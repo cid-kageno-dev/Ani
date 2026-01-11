@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ani 💜 AI Assistant</title>
+    <style>
+        /* --- DARK THEME CSS --- */
+        body {
+            background-color: #0f0f12; /* Deep dark background */
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .chat-container {
+            width: 400px;
+            height: 600px;
+            background-color: #1a1a1f;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(138, 43, 226, 0.2); /* Purple Glow */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: white;
+            border-bottom: 1px solid #333;
+        }
+
+        .chat-box {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* Scrollbar styling */
+        .chat-box::-webkit-scrollbar { width: 8px; }
+        .chat-box::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+        .message {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .user-msg {
+            align-self: flex-end;
+            background-color: #6a11cb; /* Purple */
+            color: white;
+            border-bottom-right-radius: 2px;
+        }
+
+        .bot-msg {
+            align-self: flex-start;
+            background-color: #2d2d35;
+            color: #d1d1d1;
+            border-bottom-left-radius: 2px;
+            border: 1px solid #3d3d45;
+        }
+
+        /* Lists in bot messages */
+        .bot-msg ul { padding-left: 20px; margin: 5px 0; }
+
+        .input-area {
+            padding: 15px;
+            background-color: #1a1a1f;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border-radius: 20px;
+            border: 1px solid #444;
+            background-color: #0f0f12;
+            color: white;
+            outline: none;
+        }
+
+        input[type="text"]:focus { border-color: #6a11cb; }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            background-color: #6a11cb;
+            color: white;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        button:hover { background-color: #5a0eb0; }
+        
+        .loading { font-size: 0.8rem; color: #888; margin-left: 10px; display: none;}
+    </style>
+</head>
+<body>
+
+    <div class="chat-container">
+        <div class="chat-header">
+            Ani 💜
+        </div>
+        
+        <div class="chat-box" id="chat-box">
+            <div class="message bot-msg">Hello! I'm Ani. How can I help you today?</div>
+        </div>
+        
+        <div class="loading" id="loading">Ani is typing...</div>
+
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Ask about projects..." onkeypress="handleEnter(event)">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const chatBox = document.getElementById('chat-box');
+            const loading = document.getElementById('loading');
+            const text = input.value.trim();
+
+            if (!text) return;
+
+            // 1. Add User Message
+            addMessage(text, 'user-msg');
+            input.value = '';
+            loading.style.display = 'block';
+
+            try {
+                // 2. Send to Backend
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const data = await response.json();
+                
+                // 3. Add Bot Message
+                // Replace \n with <br> and bullet points for HTML rendering
+                let formattedResponse = data.response
+                    .replace(/\n/g, '<br>')
+                    .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>'); // Bold text support
+
+                addMessage(formattedResponse, 'bot-msg', true);
+
+            } catch (error) {
+                addMessage("Error connecting to Ani.", 'bot-msg');
+            } finally {
+                loading.style.display = 'none';
+            }
+        }
+
+        function addMessage(text, className, isHtml = false) {
+            const chatBox = document.getElementById('chat-box');
+            const div = document.createElement('div');
+            div.className = `message ${className}`;
+            if (isHtml) {
+                div.innerHTML = text;
+            } else {
+                div.textContent = text;
+            }
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight; // Auto scroll to bottom
+        }
+
+        function handleEnter(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+    </script>
+</body>
+</html>
