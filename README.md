@@ -8,7 +8,7 @@
 
 ## ⚡ Key Features
 
-* **🧠 Intelligent Persona:** Actively roleplays as "Ani," a tech-savvy assistant created by Cid Kageno.
+* **🧠 Intelligent Persona:** Actively roleplays as "Ani," a AI assistant created by Cid Kageno.
 * **🔄 Smart Key Rotation:** Automatically cycles through multiple API keys (`KEY1`, `KEY2`, etc.) to bypass rate limits and ensure 99.9% uptime.
 * **📂 Live GitHub Sync:** Fetches real-time repository data, bio, and contact info via the GitHub API.
 * **🚀 Efficient Caching:** Implements a 5-minute caching layer to prevent hitting GitHub API rate limits.
@@ -20,8 +20,8 @@
 
 1.  **Clone the Repository**
     ```bash
-    git clone [https://github.com/cid-kageno-dev/ani-chatbot.git](https://github.com/cid-kageno-dev/ani-chatbot.git)
-    cd ani-chatbot
+    git clone [https://github.com/cid-kageno-dev/ani.git](https://github.com/cid-kageno-dev/ani.git)
+    cd ani
     ```
 
 2.  **Install Dependencies**
