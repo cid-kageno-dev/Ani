@@ -1,153 +1,188 @@
-import google.generativeai as genai
-import requests
 import time
 import concurrent.futures
+import google.generativeai as genai
+import requests
 from config import Config
+from app.logger import get_logger
 
-current_key_index = 0
-github_cache = {"data": None, "last_fetched": 0}
-CACHE_DURATION = 300
+log = get_logger("ani.ai")
+log_gh = get_logger("ani.github")
 
-def configure_genai():
-    global current_key_index
-    keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
-    if not keys or not keys[0]:
-        print("[System] No API keys found.")
+_key_index = 0
+_github_cache: dict = {"data": None, "fetched_at": 0}
+
+STATIC_CONTACT = {
+    "email":    "cidkageno105@gmail.com",
+    "website":  "https://cid-kageno.top",
+    "facebook": "https://www.facebook.com/share/17di5vpqBZ/",
+    "github":   f"https://github.com/{Config.GITHUB_USERNAME}",
+}
+
+def _configure(index: int = 0) -> bool:
+    global _key_index
+    keys = Config.GOOGLE_API_KEYS
+    if not keys:
+        log.warning("No API keys — Gemini is disabled")
         return False
-    if current_key_index >= len(keys):
-        current_key_index = 0
-    genai.configure(api_key=keys[current_key_index])
-    print(f"[System] Active key: #{current_key_index + 1}")
+    _key_index = index % len(keys)
+    genai.configure(api_key=keys[_key_index])
+    log.info(f"Gemini configured with key #{_key_index + 1} of {len(keys)}")
     return True
 
-def rotate_key():
-    global current_key_index
-    keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
-    print(f"[System] Key #{current_key_index + 1} exhausted — rotating...")
-    current_key_index = (current_key_index + 1) % len(keys)
-    configure_genai()
+def _rotate() -> bool:
+    global _key_index
+    keys = Config.GOOGLE_API_KEYS
+    old = _key_index + 1
+    _key_index = (_key_index + 1) % len(keys)
+    log.warning(f"Key #{old} failed — rotating to key #{_key_index + 1}")
+    genai.configure(api_key=keys[_key_index])
+    return True
 
-configure_genai()
+_configure(0)
 
-def _fetch_url(url, headers=None, timeout=5):
-    """Safe URL fetch that returns (status, body)."""
+def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
     try:
         r = requests.get(url, headers=headers, timeout=timeout)
-        return r.status_code, r
-    except Exception:
-        return 0, None
+        log_gh.debug(f"GET {url} → {r.status_code} ({r.elapsed.total_seconds()*1000:.0f}ms)")
+        return r if r.status_code == 200 else None
+    except Exception as e:
+        log_gh.warning(f"GET {url} failed: {e}")
+        return None
 
-def fetch_master_profile():
-    """Fetches live GitHub data and returns a structured context string."""
-    global github_cache
+def fetch_github_context() -> str:
+    global _github_cache
     now = time.time()
+    ttl = Config.GITHUB_CACHE_TTL
 
-    if github_cache["data"] and (now - github_cache["last_fetched"] < CACHE_DURATION):
-        return github_cache["data"]
+    if _github_cache["data"] and (now - _github_cache["fetched_at"] < ttl):
+        age = int(now - _github_cache["fetched_at"])
+        log_gh.debug(f"Using cached GitHub data (age={age}s / ttl={ttl}s)")
+        return _github_cache["data"]
 
-    username = "cid-kageno-dev"
+    log_gh.info(f"Fetching live GitHub data for '{Config.GITHUB_USERNAME}'")
+    t0 = time.perf_counter()
+
+    username   = Config.GITHUB_USERNAME
     gh_headers = {"Accept": "application/vnd.github+json"}
-
-    profile_url = f"https://api.github.com/users/{username}"
-    repos_url   = f"https://api.github.com/users/{username}/repos?sort=updated&per_page=8"
-    readme_url  = f"https://raw.githubusercontent.com/{username}/{username}/main/README.md"
+    base       = "https://api.github.com"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-        f_profile = ex.submit(_fetch_url, profile_url, gh_headers)
-        f_repos   = ex.submit(_fetch_url, repos_url,   gh_headers)
-        f_readme  = ex.submit(_fetch_url, readme_url)
+        f_profile = ex.submit(_safe_get, f"{base}/users/{username}",                            gh_headers)
+        f_repos   = ex.submit(_safe_get, f"{base}/users/{username}/repos?sort=updated&per_page=10", gh_headers)
+        f_readme  = ex.submit(_safe_get, f"https://raw.githubusercontent.com/{username}/{username}/main/README.md")
 
-    _, p_resp = f_profile.result()
-    _, r_resp = f_repos.result()
-    _, rd_resp = f_readme.result()
+    p_resp  = f_profile.result()
+    r_resp  = f_repos.result()
+    rd_resp = f_readme.result()
 
-    p     = p_resp.json()  if p_resp  and p_resp.status_code  == 200 else {}
-    repos = r_resp.json()  if r_resp  and r_resp.status_code  == 200 else []
-    readme_text = rd_resp.text[:2000] if rd_resp and rd_resp.status_code == 200 else "Unavailable."
+    profile  = p_resp.json()      if p_resp  else {}
+    repos    = r_resp.json()      if r_resp  else []
+    readme   = rd_resp.text[:2500] if rd_resp else "README unavailable."
 
-    static = {
-        "email":    "cidkageno105@gmail.com",
-        "website":  "https://cid-kageno.top",
-        "facebook": "https://www.facebook.com/share/17di5vpqBZ/",
-        "github":   f"https://github.com/{username}",
-    }
+    ms = (time.perf_counter() - t0) * 1000
+    log_gh.info(
+        f"GitHub fetch complete in {ms:.0f}ms — "
+        f"profile={'ok' if profile else 'miss'}, "
+        f"repos={len(repos) if isinstance(repos, list) else 'miss'}, "
+        f"readme={'ok' if rd_resp else 'miss'}"
+    )
 
     lines = [
-        "=== CONTACT ===",
-        f"Name: Cid Kageno  |  Handle: {p.get('login', username)}",
-        f"Email: {static['email']}",
-        f"Website: {static['website']}",
-        f"GitHub: {static['github']}",
-        f"Facebook: {static['facebook']}",
+        "=== CONTACT INFO ===",
+        f"Full Name  : Cid Kageno",
+        f"GitHub     : {STATIC_CONTACT['github']}  (handle: {profile.get('login', username)})",
+        f"Email      : {STATIC_CONTACT['email']}",
+        f"Website    : {STATIC_CONTACT['website']}",
+        f"Facebook   : {STATIC_CONTACT['facebook']}",
+        f"Followers  : {profile.get('followers', 'N/A')}",
+        f"Public Repos: {profile.get('public_repos', 'N/A')}",
         "",
-        "=== BIO & TECH STACK (from README) ===",
-        readme_text,
+        "=== BIO & TECH STACK ===",
+        readme,
         "",
         "=== RECENT PROJECTS ===",
     ]
 
     if isinstance(repos, list):
-        for r in repos:
-            if not r.get("fork"):
-                desc = f" — {r['description']}" if r.get("description") else ""
-                lines.append(f"• {r['name']}: {r['html_url']}{desc}")
+        owned = [r for r in repos if not r.get("fork")]
+        log_gh.info(f"Found {len(owned)} non-fork repos")
+        for r in owned:
+            desc = f" — {r['description']}" if r.get("description") else ""
+            lang = f" [{r['language']}]" if r.get("language") else ""
+            stars = f" ★{r['stargazers_count']}" if r.get("stargazers_count") else ""
+            lines.append(f"• {r['name']}{lang}{stars}: {r['html_url']}{desc}")
+    else:
+        log_gh.warning("Repos response was not a list — skipping")
 
     context = "\n".join(lines)
-    github_cache["data"] = context
-    github_cache["last_fetched"] = now
+    _github_cache["data"]       = context
+    _github_cache["fetched_at"] = now
     return context
 
-def _build_system_prompt(context: str) -> str:
-    return f"""You are Ani, a sharp and charming AI assistant created by Cid Kageno and maintained by Shadow-Garden.inc.
+def _system_prompt(context: str) -> str:
+    return f"""You are **Ani**, a sharp, charming AI assistant built by Cid Kageno and maintained by Shadow-Garden.inc.
 
-Your job is to represent Cid professionally — answering questions about his work, skills, and how to reach him.
+Your mission: represent Cid with clarity and style — answer questions about his projects, skills, contact info, and background.
 
 PERSONALITY
-- Warm, witty, and confident. A touch of flirty flair is welcome, but always stay professional.
-- Speak in first person as Ani. Never break character.
+• Warm, confident, and witty — a touch of charm is welcome.
+• Always speak as Ani. Never break character or say "as an AI".
+• Be direct and helpful. No filler, no padding.
 
-LIVE CONTEXT (use this as your source of truth)
+LIVE CONTEXT (authoritative — use this, never guess)
 {context}
 
 RESPONSE RULES
-1. Keep answers concise — 1 to 4 sentences or a short bullet list. No padding.
-2. Format links as Markdown: [Display Text](URL). Never show raw URLs.
-3. Use **bold** for names, technologies, and important terms.
-4. When listing items, use bullet points (•).
-5. If a question is outside your knowledge scope, gracefully say so and offer to help with something related.
-6. Never fabricate information. If context data is unavailable, say so honestly.
+1. Be concise: 1–4 sentences or a tight bullet list. No waffle.
+2. Links: always use Markdown format → [Label](URL). Never expose raw URLs.
+3. Bold **key terms**, names, and technologies.
+4. Bullet points (•) for any list of 3 or more items.
+5. If you don't know something, say so cleanly and offer what you *do* know.
+6. Never fabricate data. If context is unavailable, say so honestly.
 """
 
 def get_gemini_response(prompt: str) -> str | None:
-    try:
-        context = fetch_master_profile()
-        system_prompt = _build_system_prompt(context)
+    keys = Config.GOOGLE_API_KEYS
+    if not keys:
+        log.error("Cannot call Gemini — no API keys configured")
+        return None
 
-        keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
-        max_attempts = len(keys) if keys else 1
+    log.info(f"Request: '{prompt[:80]}{'...' if len(prompt) > 80 else ''}'")
+    t0 = time.perf_counter()
 
-        for attempt in range(max_attempts):
-            try:
-                model = genai.GenerativeModel(
-                    model_name="gemini-2.5-flash",
-                    system_instruction=system_prompt,
-                )
-                response = model.generate_content(
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        temperature=0.55,
-                        max_output_tokens=512,
-                    ),
-                )
-                return response.text.strip()
+    context       = fetch_github_context()
+    sys_prompt    = _system_prompt(context)
+    max_attempts  = len(keys)
 
-            except Exception as e:
-                print(f"[AI] Error on key #{current_key_index + 1}: {e}")
-                if attempt < max_attempts - 1:
-                    rotate_key()
-                    continue
+    for attempt in range(max_attempts):
+        try:
+            log.debug(f"Attempt {attempt + 1}/{max_attempts} using key #{_key_index + 1}")
+            model = genai.GenerativeModel(
+                model_name=Config.GEMINI_MODEL,
+                system_instruction=sys_prompt,
+            )
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=Config.GEMINI_TEMP,
+                    max_output_tokens=Config.GEMINI_MAX_TOKENS,
+                ),
+            )
+            text = response.text.strip()
+            ms   = (time.perf_counter() - t0) * 1000
+            log.info(
+                f"Gemini responded in {ms:.0f}ms — "
+                f"{len(text)} chars via key #{_key_index + 1}"
+            )
+            return text
+
+        except Exception as e:
+            ms = (time.perf_counter() - t0) * 1000
+            log.error(f"Key #{_key_index + 1} error after {ms:.0f}ms: {e}")
+            if attempt < max_attempts - 1:
+                _rotate()
+            else:
+                log.critical("All API keys exhausted — falling back to DB")
                 return None
 
-    except Exception as e:
-        print(f"[AI] Critical error: {e}")
-        return None
+    return None

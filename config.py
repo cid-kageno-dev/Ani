@@ -1,32 +1,45 @@
 import os
 from dotenv import load_dotenv
+from app.logger import get_logger, setup_logging
 
 load_dotenv()
+setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+
+log = get_logger("ani.config")
 
 class Config:
-    # This list will hold all found keys
-    GOOGLE_API_KEYS = []
-    
-    # --- DYNAMIC KEY LOADER ---
-    # 1. Loop to find GOOGLE_API_KEY1, GOOGLE_API_KEY2, etc.
-    i = 1
+    GOOGLE_API_KEYS: list[str] = []
+
+    _i = 1
     while True:
-        key = os.getenv(f'GOOGLE_API_KEY{i}')
-        if not key:
-            break # Stop when we run out of numbered keys
-        GOOGLE_API_KEYS.append(key)
-        i += 1
-        
-    # 2. Fallback: If no numbered keys exist, check for the standard GOOGLE_API_KEY
+        _key = os.getenv(f"GOOGLE_API_KEY{_i}")
+        if not _key:
+            break
+        GOOGLE_API_KEYS.append(_key)
+        _i += 1
+
     if not GOOGLE_API_KEYS:
-        single_key = os.getenv('GOOGLE_API_KEY')
-        if single_key:
-            GOOGLE_API_KEYS.append(single_key)
+        _single = os.getenv("GOOGLE_API_KEY")
+        if _single:
+            GOOGLE_API_KEYS.append(_single)
 
-    # --- OTHER CONFIGS ---
-    SHEET_NAME = os.getenv('SHEET_NAME')
-    SHEET_CREDS = os.getenv('GOOGLE_SHEET_CREDS')
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-    # Optional: Print how many keys were found for debugging (remove in production)
-    # print(f">> Config loaded {len(GOOGLE_API_KEYS)} API keys.")
-    
+    GITHUB_USERNAME: str = os.getenv("GITHUB_USERNAME", "cid-kageno-dev")
+    GITHUB_CACHE_TTL: int = int(os.getenv("GITHUB_CACHE_TTL", "300"))
+
+    GEMINI_MODEL: str    = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_TEMP: float   = float(os.getenv("GEMINI_TEMP", "0.55"))
+    GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "512"))
+
+    DEBUG: bool = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+
+    if GOOGLE_API_KEYS:
+        log.info(f"Loaded {len(GOOGLE_API_KEYS)} Gemini API key(s)")
+    else:
+        log.warning("No Gemini API keys found — AI responses will be unavailable")
+
+    if DATABASE_URL:
+        log.info("DATABASE_URL is set")
+    else:
+        log.warning("DATABASE_URL not set — database features will be unavailable")
