@@ -13,56 +13,44 @@ def home():
 @main.route('/chat', methods=['POST'])
 @cross_origin()
 def chat():
-    user_input = request.json.get('message')
+    data = request.get_json(silent=True)
+    user_input = (data or {}).get('message', '').strip()
 
     if not user_input:
         return jsonify({"error": "Message is required"}), 400
 
-    print(f"User asking: {user_input}")
+    print(f"[Chat] {user_input[:80]}")
 
     ai_response = get_gemini_response(user_input)
 
     if ai_response:
-        thread = threading.Thread(
+        threading.Thread(
             target=save_interaction,
-            args=(user_input, ai_response, "AI Response")
-        )
-        thread.start()
+            args=(user_input, ai_response, "AI Response"),
+            daemon=True
+        ).start()
+        return jsonify({"response": ai_response, "source": "AI Response"})
 
-        return jsonify({
-            "response": ai_response,
-            "source": "AI Response"
-        })
-
-    else:
-        print("Gemini unavailable, switching to fallback...")
-        fallback_msg = get_fallback_answer(user_input)
-
-        thread = threading.Thread(
-            target=save_interaction,
-            args=(user_input, fallback_msg, "Database")
-        )
-        thread.start()
-
-        return jsonify({
-            "response": fallback_msg,
-            "source": "Database"
-        })
+    fallback = get_fallback_answer(user_input)
+    threading.Thread(
+        target=save_interaction,
+        args=(user_input, fallback, "Database"),
+        daemon=True
+    ).start()
+    return jsonify({"response": fallback, "source": "Database"})
 
 @main.route('/history', methods=['GET'])
 @cross_origin()
 def history():
-    """Return recent chat interactions from the database."""
-    limit = request.args.get('limit', 20, type=int)
+    limit = min(request.args.get('limit', 20, type=int), 100)
     rows = get_recent_interactions(limit=limit)
-    interactions = [
+    return jsonify([
         {
             "id": row["id"],
             "user_query": row["user_query"],
             "ai_response": row["ai_response"],
             "source": row["source"],
-            "created_at": row["created_at"].isoformat()
+            "created_at": row["created_at"].isoformat(),
         }
         for row in rows
-    ]
-    return jsonify(interactions)
+    ])

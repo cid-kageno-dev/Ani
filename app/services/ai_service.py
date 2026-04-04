@@ -1,189 +1,153 @@
 import google.generativeai as genai
 import requests
 import time
+import concurrent.futures
 from config import Config
 
-# --- GLOBAL VARIABLES ---
 current_key_index = 0
-github_cache = {
-    "data": None,
-    "last_fetched": 0
-}
-CACHE_DURATION = 300  # 5 minutes (300 seconds)
+github_cache = {"data": None, "last_fetched": 0}
+CACHE_DURATION = 300
 
-# --- KEY ROTATION SYSTEM ---
 def configure_genai():
-    """Configures GenAI with the current active key."""
     global current_key_index
-    
-    # Handle single key or list of keys
     keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
-    
     if not keys or not keys[0]:
-        print("[System Error] No API Keys found in Config!")
+        print("[System] No API keys found.")
         return False
-
-    # Safety check: reset index if out of bounds
     if current_key_index >= len(keys):
         current_key_index = 0
-    
-    active_key = keys[current_key_index]
-    genai.configure(api_key=active_key)
-    print(f">> System Configured with Key #{current_key_index + 1}")
+    genai.configure(api_key=keys[current_key_index])
+    print(f"[System] Active key: #{current_key_index + 1}")
     return True
 
 def rotate_key():
-    """Switches to the next API key in the list."""
     global current_key_index
     keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
-    
-    print(f"!! Key #{current_key_index + 1} failed. Switching to next key...")
-    
+    print(f"[System] Key #{current_key_index + 1} exhausted — rotating...")
     current_key_index = (current_key_index + 1) % len(keys)
     configure_genai()
 
-# Initialize the first key on startup
 configure_genai()
 
-# --- MULTI-SOURCE DATA FETCHING ---
-def fetch_master_profile():
-    """
-    Aggregates data from:
-    1. GitHub API (Live Repos)
-    2. Raw README (Bio & Stack text)
-    3. Static Config (Email/Socials hardcoded for safety)
-    """
-    global github_cache
-    current_time = time.time()
+def _fetch_url(url, headers=None, timeout=5):
+    """Safe URL fetch that returns (status, body)."""
+    try:
+        r = requests.get(url, headers=headers, timeout=timeout)
+        return r.status_code, r
+    except Exception:
+        return 0, None
 
-    # 1. Check Cache
-    if github_cache["data"] and (current_time - github_cache["last_fetched"] < CACHE_DURATION):
-        print(">> Using Cached GitHub Data")
+def fetch_master_profile():
+    """Fetches live GitHub data and returns a structured context string."""
+    global github_cache
+    now = time.time()
+
+    if github_cache["data"] and (now - github_cache["last_fetched"] < CACHE_DURATION):
         return github_cache["data"]
 
     username = "cid-kageno-dev"
-    headers = {"Accept": "application/vnd.github+json"}
-    
+    gh_headers = {"Accept": "application/vnd.github+json"}
+
+    profile_url = f"https://api.github.com/users/{username}"
+    repos_url   = f"https://api.github.com/users/{username}/repos?sort=updated&per_page=8"
+    readme_url  = f"https://raw.githubusercontent.com/{username}/{username}/main/README.md"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        f_profile = ex.submit(_fetch_url, profile_url, gh_headers)
+        f_repos   = ex.submit(_fetch_url, repos_url,   gh_headers)
+        f_readme  = ex.submit(_fetch_url, readme_url)
+
+    _, p_resp = f_profile.result()
+    _, r_resp = f_repos.result()
+    _, rd_resp = f_readme.result()
+
+    p     = p_resp.json()  if p_resp  and p_resp.status_code  == 200 else {}
+    repos = r_resp.json()  if r_resp  and r_resp.status_code  == 200 else []
+    readme_text = rd_resp.text[:2000] if rd_resp and rd_resp.status_code == 200 else "Unavailable."
+
+    static = {
+        "email":    "cidkageno105@gmail.com",
+        "website":  "https://cid-kageno.top",
+        "facebook": "https://www.facebook.com/share/17di5vpqBZ/",
+        "github":   f"https://github.com/{username}",
+    }
+
+    lines = [
+        "=== CONTACT ===",
+        f"Name: Cid Kageno  |  Handle: {p.get('login', username)}",
+        f"Email: {static['email']}",
+        f"Website: {static['website']}",
+        f"GitHub: {static['github']}",
+        f"Facebook: {static['facebook']}",
+        "",
+        "=== BIO & TECH STACK (from README) ===",
+        readme_text,
+        "",
+        "=== RECENT PROJECTS ===",
+    ]
+
+    if isinstance(repos, list):
+        for r in repos:
+            if not r.get("fork"):
+                desc = f" — {r['description']}" if r.get("description") else ""
+                lines.append(f"• {r['name']}: {r['html_url']}{desc}")
+
+    context = "\n".join(lines)
+    github_cache["data"] = context
+    github_cache["last_fetched"] = now
+    return context
+
+def _build_system_prompt(context: str) -> str:
+    return f"""You are Ani, a sharp and charming AI assistant created by Cid Kageno and maintained by Shadow-Garden.inc.
+
+Your job is to represent Cid professionally — answering questions about his work, skills, and how to reach him.
+
+PERSONALITY
+- Warm, witty, and confident. A touch of flirty flair is welcome, but always stay professional.
+- Speak in first person as Ani. Never break character.
+
+LIVE CONTEXT (use this as your source of truth)
+{context}
+
+RESPONSE RULES
+1. Keep answers concise — 1 to 4 sentences or a short bullet list. No padding.
+2. Format links as Markdown: [Display Text](URL). Never show raw URLs.
+3. Use **bold** for names, technologies, and important terms.
+4. When listing items, use bullet points (•).
+5. If a question is outside your knowledge scope, gracefully say so and offer to help with something related.
+6. Never fabricate information. If context data is unavailable, say so honestly.
+"""
+
+def get_gemini_response(prompt: str) -> str | None:
     try:
-        # --- LAYER 1: API DATA ---
-        profile_url = f"https://api.github.com/users/{username}"
-        p_resp = requests.get(profile_url, headers=headers, timeout=5)
-        p = p_resp.json() if p_resp.status_code == 200 else {}
-        
-        repo_url = f"https://api.github.com/users/{username}/repos?sort=updated&per_page=5"
-        r_resp = requests.get(repo_url, headers=headers, timeout=5)
-        repos = r_resp.json() if r_resp.status_code == 200 else []
+        context = fetch_master_profile()
+        system_prompt = _build_system_prompt(context)
 
-        # --- LAYER 2: RAW README (For Tech Stack & Bio) ---
-        readme_url = f"https://raw.githubusercontent.com/{username}/{username}/main/README.md"
-        readme_resp = requests.get(readme_url, timeout=5)
-        readme_text = readme_resp.text if readme_resp.status_code == 200 else "Bio details unavailable."
+        keys = Config.GOOGLE_API_KEYS if isinstance(Config.GOOGLE_API_KEYS, list) else [Config.GOOGLE_API_KEYS]
+        max_attempts = len(keys) if keys else 1
 
-        # --- LAYER 3: STATIC TRUTH (From your uploaded Screenshots) ---
-        static_info = {
-            "Email": "cidkageno105@gmail.com",
-            "Website": "https://cid-kageno.top",
-            "Facebook": "https://www.facebook.com/share/17di5vpqBZ/",
-            "GitHub": f"https://github.com/{username}"
-        }
-
-        # --- BUILD CONTEXT STRING ---
-        info = "--- 1. CORE CONTACT INFO ---\n"
-        info += f"User: {p.get('login', username)}\n"
-        info += f"Email: {static_info['Email']}\n"
-        info += f"Website: {static_info['Website']}\n"
-        info += f"Facebook: {static_info['Facebook']}\n"
-        info += f"GitHub Profile: {static_info['GitHub']}\n\n"
-
-        info += "--- 2. PROFILE README (BIO & STACK) ---\n"
-        # Truncate to first 1500 chars to save tokens
-        info += f"{readme_text[:1500]}...\n\n"
-
-        info += "--- 3. RECENT PROJECTS ---\n"
-        if isinstance(repos, list):
-            for r in repos:
-                if not r.get('fork'):
-                    desc = r.get('description')
-                    desc_text = f" - {desc}" if desc else ""
-                    info += f"• {r.get('name')}: {r.get('html_url')}{desc_text}\n"
-        
-        # Update Cache
-        github_cache["data"] = info
-        github_cache["last_fetched"] = current_time
-        return info
-
-    except Exception as e:
-        print(f"[Fetch Error]: {e}")
-        # Return old data if fetch fails, or error message
-        return github_cache["data"] if github_cache["data"] else "[System Note: Data unavailable.]"
-
-# --- MAIN AI FUNCTION ---
-def get_gemini_response(prompt):
-    try:
-        # 1. Trigger Check
-        triggers = [
-            'project', 'repo', 'code', 'github', 'work', 
-            'contact', 'email', 'reach', 'message', 'dm', 'hire', 
-            'stack', 'tech', 'skill', 'about', 'who'
-        ]
-        
-        context_data = ""
-        if any(t in prompt.lower() for t in triggers):
-            context_data = fetch_master_profile()
-
-        # 2. SYSTEM INSTRUCTION
-        system_instruction = (
-            "Act as Ani, an AI assistant Developed by Cid Kageno. Maintained by Shadow-Garden.inc."
-            "You are helpful, flirty and professional. 💜\n\n"
-            
-            "--- CONTEXT DATA ---\n"
-            f"{context_data}\n\n"
-            
-            "--- RESPONSE RULES ---\n"
-            "1. **Clean Links:** When providing contact info, ALWAYS use Markdown format: `[Display Text](URL)`.\n"
-            "   - Example: `[Email](mailto:cidkageno105@gmail.com)`\n"
-            "   - Example: `[Website](https://cid-kageno.top)`\n"
-            "   - Example: `[Facebook](https://facebook.com/...)`\n"
-            "2. **Information Source:** Use the raw Profile README data to answer questions about Tech Stacks (Flask, React, etc.).\n"
-            "3. **Brevity:** Keep answers concise (under 3-4 sentences). Use bullet points for lists.\n"
-            "4. **No Fluff:** Do not show raw URLs. Only show the clickable text."
-        )
-
-        # 3. ROTATION LOOP
-        max_attempts = len(Config.GOOGLE_API_KEYS) if isinstance(Config.GOOGLE_API_KEYS, list) else 1
-        
         for attempt in range(max_attempts):
             try:
                 model = genai.GenerativeModel(
-                    model_name='gemini-2.5-flash', 
-                    system_instruction=system_instruction
+                    model_name="gemini-2.5-flash",
+                    system_instruction=system_prompt,
                 )
-                
                 response = model.generate_content(
                     prompt,
                     generation_config=genai.types.GenerationConfig(
-                        temperature=0.6, 
-                        max_output_tokens=600 
-                    )
+                        temperature=0.55,
+                        max_output_tokens=512,
+                    ),
                 )
-                
                 return response.text.strip()
 
             except Exception as e:
-                print(f"[AI Error on Key #{current_key_index + 1}]: {e}")
-                
-                if attempt == max_attempts - 1:
-                    return "System Overload. Please try again later. 💀"
-                
-                rotate_key()
-                continue
+                print(f"[AI] Error on key #{current_key_index + 1}: {e}")
+                if attempt < max_attempts - 1:
+                    rotate_key()
+                    continue
+                return None
 
     except Exception as e:
-        print(f"[Critical System Error]: {e}")
-        return "I can't reach the archives right now. 💜"
-
-# --- TEST BLOCK ---
-if __name__ == "__main__":
-    print("User: Contact info?")
-    print("Ani:", get_gemini_response("How can I contact Cid?"))
-    
+        print(f"[AI] Critical error: {e}")
+        return None
