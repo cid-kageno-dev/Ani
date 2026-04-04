@@ -6,3 +6,4 @@ oauth2client
 thefuzz
 gunicorn
 flask-cors
+psycopg2-binary
