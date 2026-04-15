@@ -3,23 +3,29 @@ const memory = require("../services/memory/memory.local");
 const personaService = require("../services/persona/persona.service");
 const { buildPrompt } = require("../utils/promptBuilder");
 const logger = require("../utils/logger");
+const config = require("../config");
 
 async function chat(req, res, next) {
   try {
     const { userId, message } = req.body;
 
-    const history = await memory.get(userId);
-    const personality = personaService.get(userId);
+    const [history, personality] = await Promise.all([
+      memory.get(userId),
+      Promise.resolve(personaService.get(userId)),
+    ]);
+
     const prompt = buildPrompt(personality, history, message);
 
-    logger.info("Sending prompt to LLM", { userId, model: process.env.MODEL_NAME });
+    logger.info("LLM request", { userId, provider: config.llmProvider });
 
-    const responseText = await llm.generate(prompt);
+    const response = await llm.generate(prompt);
 
-    await memory.append(userId, { role: "user", content: message });
-    await memory.append(userId, { role: "assistant", content: responseText });
+    await Promise.all([
+      memory.append(userId, { role: "user",      content: message  }),
+      memory.append(userId, { role: "assistant", content: response }),
+    ]);
 
-    res.json({ success: true, data: { response: responseText } });
+    res.json({ success: true, data: { response } });
   } catch (err) {
     next(err);
   }

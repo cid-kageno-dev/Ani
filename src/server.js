@@ -4,9 +4,15 @@ const config = require("./config");
 const logger = require("./utils/logger");
 
 const server = app.listen(config.port, "0.0.0.0", () => {
-  logger.info(`Ani backend running on port ${config.port}`, {
-    model: config.modelName,
-    ollama: config.ollamaUrl,
+  logger.info("Ani backend started", {
+    port:     config.port,
+    provider: config.llmProvider,
+    model:    config.llmProvider === "gemini"
+                ? config.geminiModel
+                : config.llmProvider === "openai"
+                  ? config.openaiModel
+                  : config.ollamaModel,
+    keys:     config.googleApiKeys.length || undefined,
     fallback: config.useFallback,
   });
 });

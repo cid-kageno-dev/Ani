@@ -9,7 +9,8 @@ const app = express();
 app.use(express.json());
 
 app.use((req, res, next) => {
-  logger.request(req);
+  const start = Date.now();
+  res.on("finish", () => logger.request(req, res, Date.now() - start));
   next();
 });
 
