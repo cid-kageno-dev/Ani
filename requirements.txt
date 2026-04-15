@@ -7,3 +7,13 @@ thefuzz
 gunicorn
 flask-cors
 psycopg2-binary
+flask
+flask-cors
+google-generativeai
+gspread
+gunicorn
+oauth2client
+psycopg2-binary
+python-dotenv
+requests
+thefuzz
