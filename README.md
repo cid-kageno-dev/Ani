@@ -255,22 +255,28 @@ Add as many keys as needed. The system detects them sequentially (`KEY1`, `KEY2`
 ### OpenAI
 
 Can be used as the primary provider or as an automatic fallback when the primary fails.
+Supports the same key rotation system as Gemini — add as many keys as you need.
 
-**As primary:**
+**As primary with key rotation:**
 
 ```env
 LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY1=sk-YourFirstKey...
+OPENAI_API_KEY2=sk-YourSecondKey...
+OPENAI_API_KEY3=sk-YourThirdKey...
 OPENAI_MODEL=gpt-3.5-turbo
 ```
 
-**As fallback:**
+**As fallback with key rotation:**
 
 ```env
 LLM_PROVIDER=ollama   # or gemini
 USE_FALLBACK=true
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY1=sk-YourFirstKey...
+OPENAI_API_KEY2=sk-YourSecondKey...
 ```
+
+A single `OPENAI_API_KEY` (without a number) is also accepted for backwards compatibility.
 
 ---
 

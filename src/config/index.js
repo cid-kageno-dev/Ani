@@ -1,16 +1,16 @@
 require("dotenv").config();
 
-function loadGoogleApiKeys() {
+function loadKeys(prefix, singleKey) {
   const keys = [];
   let i = 1;
   while (true) {
-    const key = process.env[`GOOGLE_API_KEY${i}`];
+    const key = process.env[`${prefix}${i}`];
     if (!key) break;
     keys.push(key);
     i++;
   }
-  if (keys.length === 0 && process.env.GOOGLE_API_KEY) {
-    keys.push(process.env.GOOGLE_API_KEY);
+  if (keys.length === 0 && process.env[singleKey]) {
+    keys.push(process.env[singleKey]);
   }
   return keys;
 }
@@ -25,10 +25,10 @@ module.exports = {
   ollamaModel:      process.env.MODEL_NAME || "mistral",
 
   geminiModel:      process.env.GEMINI_MODEL || "gemini-2.0-flash",
-  googleApiKeys:    loadGoogleApiKeys(),
+  googleApiKeys:    loadKeys("GOOGLE_API_KEY", "GOOGLE_API_KEY"),
 
-  openaiApiKey:     process.env.OPENAI_API_KEY || "",
   openaiModel:      process.env.OPENAI_MODEL || "gpt-3.5-turbo",
+  openaiApiKeys:    loadKeys("OPENAI_API_KEY", "OPENAI_API_KEY"),
 
   memoryLimit:      parseInt(process.env.MEMORY_LIMIT, 10) || 20,
   llmTimeout:       parseInt(process.env.LLM_TIMEOUT, 10) || 30000,
