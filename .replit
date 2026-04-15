@@ -1,4 +1,4 @@
-modules = ["python-3.12", "web", "postgresql-16"]
+modules = ["python-3.12", "web", "postgresql-16", "nodejs-20"]
 [agent]
 expertMode = true
 
@@ -26,7 +26,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python run.py"
+args = "PORT=5000 node src/server.js"
 waitForPort = 5000
 
 [[ports]]

@@ -1,66 +1,80 @@
-# Ani - AI Assistant
+# Ani — AI Companion Backend
 
-A context-aware AI chatbot that showcases developer projects, handles professional inquiries, and automates portfolio interactions. Developed by Cid Kageno, maintained by Shadow-Garden.inc.
+A production-ready AI companion backend built with Node.js and Express.
+Uses Ollama as the primary LLM provider with an optional OpenAI fallback.
 
 ## Architecture
 
-- **Backend:** Python / Flask (port 5000, `0.0.0.0`)
-- **Frontend:** Jinja2 HTML template (`templates/index.html`)
-- **AI:** Google Gemini (`gemini-2.5-flash`) via `google-generativeai`
-- **Database:** PostgreSQL (Replit built-in) via `psycopg2`
-- **Entry point:** `run.py` → `app/__init__.py` (factory pattern)
+- **Backend:** Node.js / Express (port 5000 on Replit, 3000 locally)
+- **Frontend:** None (pure REST API)
+- **LLM:** Ollama (primary) → OpenAI (optional fallback)
+- **Memory:** In-memory Map per userId (swappable via interface)
+- **Entry point:** `src/server.js`
 
 ## Project Layout
 
 ```
-run.py                      # App entry point
-config.py                   # API key rotation config
-app/
-  __init__.py               # Flask app factory (sets template_folder to root /templates)
-  routes.py                 # Routes: GET /, POST /chat, GET /history
+src/
+  server.js                     # Entry point
+  app.js                        # Express app + middleware setup
+  config/
+    index.js                    # All config loaded from .env
+  controllers/
+    chat.controller.js          # POST /chat
+    persona.controller.js       # POST /persona
+    history.controller.js       # GET /history, DELETE /history
+  routes/
+    index.js                    # Route aggregator + /health
+    chat.routes.js
+    persona.routes.js
+    history.routes.js
   services/
-    ai_service.py           # Gemini AI + GitHub data fetching + key rotation
-    db_service.py           # PostgreSQL: save_interaction, get_fallback_answer, get_recent_interactions
-    sheet_service.py        # Legacy Google Sheets service (kept for reference)
-    github_service.py       # GitHub data helpers
-templates/
-  index.html                # Chat UI (dark theme, vanilla JS)
-requirements.txt
+    llm/
+      index.js                  # Provider router (Ollama → OpenAI fallback)
+      ollama.provider.js        # Ollama POST /api/generate
+      openai.provider.js        # OpenAI chat completions
+    memory/
+      memory.interface.js       # Swappable interface contract
+      memory.local.js           # In-memory Map implementation
+    persona/
+      persona.service.js        # Per-user personality store
+  middlewares/
+    rateLimiter.js              # Simple in-memory rate limiter
+    validate.js                 # requireBody / requireQuery helpers
+    errorHandler.js             # Global Express error handler
+  utils/
+    logger.js                   # Minimal structured logger
+    promptBuilder.js            # Structured prompt formatter
 ```
-
-## Database Schema
-
-**Table: `chat_interactions`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL PK | Auto-increment |
-| user_query | TEXT | User's message |
-| ai_response | TEXT | Ani's response |
-| source | VARCHAR(50) | "AI Response" or "Database" |
-| created_at | TIMESTAMP | Defaults to NOW() |
 
 ## API Endpoints
 
-- `GET /` — Serves the chat UI
-- `POST /chat` — Accepts `{"message": "..."}`, returns `{"response": "...", "source": "..."}`
-- `GET /history?limit=20` — Returns recent chat interactions from the database
-
-## Key Features
-
-- **API Key Rotation:** Cycles through `GOOGLE_API_KEY1`, `GOOGLE_API_KEY2`, etc.
-- **GitHub Live Data:** Fetches real-time repo and profile data (5-minute cache)
-- **DB Fallback:** When Gemini is unavailable, fuzzy-matches past interactions from PostgreSQL
-- **Background Saving:** All interactions are saved to the DB in a background thread (non-blocking)
+- `POST /chat` — `{ userId, message }` → `{ success, data: { response } }`
+- `POST /persona` — `{ userId, personality }` → updates per-user personality
+- `GET /history?userId=` — returns conversation history for a user
+- `DELETE /history?userId=` — clears conversation history for a user
+- `GET /health` — server health check
 
 ## Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `GOOGLE_API_KEY1` | Primary Gemini API key (add more as KEY2, KEY3, etc.) |
-| `DATABASE_URL` | PostgreSQL connection string (auto-set by Replit) |
-| `SHEET_NAME` | (Optional) Legacy Google Sheets name |
-| `GOOGLE_SHEET_CREDS` | (Optional) Path to Google Sheets credentials JSON |
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `3000` | Server port (set to 5000 on Replit) |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `MODEL_NAME` | `mistral` | Ollama model to use |
+| `USE_FALLBACK` | `false` | Enable OpenAI fallback if Ollama fails |
+| `OPENAI_API_KEY` | `` | OpenAI key (only needed if USE_FALLBACK=true) |
+| `MEMORY_LIMIT` | `20` | Max messages kept per user |
+| `RATE_LIMIT_WINDOW` | `60000` | Rate limit window in ms |
+| `RATE_LIMIT_MAX` | `30` | Max requests per window per IP |
+| `LLM_TIMEOUT` | `30000` | LLM request timeout in ms |
 
 ## Workflow
 
-- **Start application:** `python run.py` → port 5000 (webview)
+- **Start application:** `PORT=5000 node src/server.js` → port 5000 (webview)
+
+## Extending
+
+- **Swap memory backend:** Implement `src/services/memory/memory.interface.js` and replace the import in controllers.
+- **Add LLM provider:** Create a new provider in `src/services/llm/`, import it in `index.js`.
+- **Add routes:** Add controller + route file, register in `src/routes/index.js`.

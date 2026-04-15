@@ -1,52 +1,208 @@
-# 💜 Ani - AI Assistant
+# Ani — AI Companion Backend
 
-> A context-aware AI chatbot built to showcase developer projects, handle professional inquiries, and automate portfolio interaction. Powered by Google Gemini 2.5 Flash.
-
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
-![Gemini](https://img.shields.io/badge/Google%20Gemini-2.5%20Flash-8E75B2?style=for-the-badge)
-![Flask](https://img.shields.io/badge/Flask-Web-000000?style=for-the-badge&logo=flask)
-
-## ⚡ Key Features
-
-* **🧠 Intelligent Persona:** Actively roleplays as "Ani," an AI assistant created by Cid Kageno.
-* **🔄 Smart Key Rotation:** Automatically cycles through multiple API keys (`KEY1`, `KEY2`, etc.) to bypass rate limits and ensure 99.9% uptime.
-* **📂 Live GitHub Sync:** Fetches real-time repository data, bio, and contact info via the GitHub API.
-* **🚀 Efficient Caching:** Implements a 5-minute caching layer to prevent hitting GitHub API rate limits.
-* **🛡️ Fail-Safe Architecture:** Dynamic fallback systems for both AI generation and data fetching.
+A clean, production-ready AI companion backend built with Node.js and Express.
+Uses a local LLM via **Ollama** as the primary provider, with an optional OpenAI fallback.
 
 ---
 
-## 🛠️ Installation
+## Features
 
-1.  **Clone the Repository**
-    ```bash
-    git clone [https://github.com/cid-kageno-dev/ani.git](https://github.com/cid-kageno-dev/ani.git)
-    cd ani
-    ```
-
-2.  **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
+- Local LLM via Ollama (no cloud required by default)
+- Per-user conversation memory (in-memory, swappable)
+- Per-user personality engine
+- Modular LLM provider abstraction (Ollama / OpenAI)
+- Rate limiting, request validation, global error handling
+- Clean REST API with consistent JSON responses
 
 ---
 
-## ⚙️ Configuration
+## Project Structure
 
-This project uses a **Dynamic Key Loader**. You can add as many API keys as you want in the `.env` file, and the system will automatically detect and rotate them.
+```
+src/
+├── app.js                        # Express app setup
+├── server.js                     # Entry point
+├── config/
+│   └── index.js                  # All config from .env
+├── controllers/
+│   ├── chat.controller.js
+│   ├── persona.controller.js
+│   └── history.controller.js
+├── routes/
+│   ├── index.js
+│   ├── chat.routes.js
+│   ├── persona.routes.js
+│   └── history.routes.js
+├── services/
+│   ├── llm/
+│   │   ├── index.js              # Provider router
+│   │   ├── ollama.provider.js
+│   │   └── openai.provider.js
+│   ├── memory/
+│   │   ├── memory.interface.js   # Swappable interface
+│   │   └── memory.local.js       # In-memory Map implementation
+│   └── persona/
+│       └── persona.service.js
+├── middlewares/
+│   ├── rateLimiter.js
+│   ├── validate.js
+│   └── errorHandler.js
+└── utils/
+    ├── logger.js
+    └── promptBuilder.js
+```
 
-1.  Create a `.env` file in the root directory.
-2.  Add your configuration:
+---
 
-```ini
-# .env file
+## Setup
 
-# --- API KEY ROTATION SYSTEM ---
-# Add as many keys as you need. The system reads them sequentially.
-GOOGLE_API_KEY1="AIzaSyD-YourFirstKey..."
-GOOGLE_API_KEY2="AIzaSyD-YourSecondKey..."
-GOOGLE_API_KEY3="AIzaSyD-YourThirdKey..."
+### 1. Install Ollama
 
-# --- GOOGLE SHEETS (Optional) ---
-SHEET_NAME="Ani_Logs"
-GOOGLE_SHEET_CREDS="credits.json"
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Then pull a model
+ollama pull mistral
+```
+
+### 2. Start Ollama
+
+```bash
+ollama serve
+```
+
+Ollama runs on `http://localhost:11434` by default.
+
+### 3. Install dependencies
+
+```bash
+npm install
+```
+
+### 4. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` as needed:
+
+```env
+PORT=3000
+OLLAMA_URL=http://localhost:11434
+MODEL_NAME=mistral
+USE_FALLBACK=false
+OPENAI_API_KEY=
+MEMORY_LIMIT=20
+RATE_LIMIT_WINDOW=60000
+RATE_LIMIT_MAX=30
+LLM_TIMEOUT=30000
+```
+
+### 5. Start the server
+
+```bash
+npm start
+```
+
+---
+
+## API Reference
+
+All responses follow this structure:
+
+```json
+{ "success": true, "data": { ... } }
+{ "success": false, "error": "..." }
+```
+
+---
+
+### POST /chat
+
+Send a message and receive a response from Ani.
+
+**Body:**
+```json
+{ "userId": "alice", "message": "Hello, who are you?" }
+```
+
+**Response:**
+```json
+{ "success": true, "data": { "response": "Hi! I'm Ani, your AI companion..." } }
+```
+
+**curl:**
+```bash
+curl -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "alice", "message": "Hello, who are you?"}'
+```
+
+---
+
+### POST /persona
+
+Set a custom personality for a user.
+
+**Body:**
+```json
+{ "userId": "alice", "personality": "Ani is a witty, sarcastic assistant who speaks in riddles." }
+```
+
+**curl:**
+```bash
+curl -X POST http://localhost:3000/persona \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "alice", "personality": "Ani is a witty, sarcastic assistant who speaks in riddles."}'
+```
+
+---
+
+### GET /history?userId=
+
+Retrieve conversation history for a user.
+
+**curl:**
+```bash
+curl "http://localhost:3000/history?userId=alice"
+```
+
+---
+
+### DELETE /history?userId=
+
+Clear conversation history for a user.
+
+**curl:**
+```bash
+curl -X DELETE "http://localhost:3000/history?userId=alice"
+```
+
+---
+
+### GET /health
+
+Check server health.
+
+**curl:**
+```bash
+curl http://localhost:3000/health
+```
+
+---
+
+## Switching LLM Provider
+
+Set `USE_FALLBACK=true` in `.env` to enable OpenAI as the fallback when Ollama fails.
+Set `OPENAI_API_KEY` to your key.
+
+To switch models, change `MODEL_NAME` in `.env` (e.g., `llama3`, `phi3`, `gemma`).
+
+---
+
+## Extending Memory
+
+To swap to Redis or MongoDB, implement the interface in `src/services/memory/memory.interface.js`
+and replace the import in the controllers with your new implementation. No other code changes needed.
