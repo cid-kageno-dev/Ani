@@ -1,8 +1,6 @@
 flask
 python-dotenv
-google-generativeai
-gspread
-oauth2client
+google-genai
 thefuzz
 gunicorn
 flask-cors

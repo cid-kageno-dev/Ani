@@ -1,6 +1,7 @@
 import time
 import concurrent.futures
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import requests
 from config import Config
 from app.logger import get_logger
@@ -9,6 +10,7 @@ log = get_logger("ani.ai")
 log_gh = get_logger("ani.github")
 
 _key_index = 0
+_client: genai.Client | None = None
 _github_cache: dict = {"data": None, "fetched_at": 0}
 
 STATIC_CONTACT = {
@@ -18,27 +20,31 @@ STATIC_CONTACT = {
     "github":   f"https://github.com/{Config.GITHUB_USERNAME}",
 }
 
+
 def _configure(index: int = 0) -> bool:
-    global _key_index
+    global _key_index, _client
     keys = Config.GOOGLE_API_KEYS
     if not keys:
         log.warning("No API keys — Gemini is disabled")
         return False
     _key_index = index % len(keys)
-    genai.configure(api_key=keys[_key_index])
+    _client = genai.Client(api_key=keys[_key_index])
     log.info(f"Gemini configured with key #{_key_index + 1} of {len(keys)}")
     return True
 
+
 def _rotate() -> bool:
-    global _key_index
+    global _key_index, _client
     keys = Config.GOOGLE_API_KEYS
     old = _key_index + 1
     _key_index = (_key_index + 1) % len(keys)
+    _client = genai.Client(api_key=keys[_key_index])
     log.warning(f"Key #{old} failed — rotating to key #{_key_index + 1}")
-    genai.configure(api_key=keys[_key_index])
     return True
 
+
 _configure(0)
+
 
 def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
     try:
@@ -48,6 +54,7 @@ def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
     except Exception as e:
         log_gh.warning(f"GET {url} failed: {e}")
         return None
+
 
 def fetch_github_context() -> str:
     global _github_cache
@@ -67,7 +74,7 @@ def fetch_github_context() -> str:
     base       = "https://api.github.com"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-        f_profile = ex.submit(_safe_get, f"{base}/users/{username}",                            gh_headers)
+        f_profile = ex.submit(_safe_get, f"{base}/users/{username}", gh_headers)
         f_repos   = ex.submit(_safe_get, f"{base}/users/{username}/repos?sort=updated&per_page=10", gh_headers)
         f_readme  = ex.submit(_safe_get, f"https://raw.githubusercontent.com/{username}/{username}/main/README.md")
 
@@ -75,9 +82,9 @@ def fetch_github_context() -> str:
     r_resp  = f_repos.result()
     rd_resp = f_readme.result()
 
-    profile  = p_resp.json()      if p_resp  else {}
-    repos    = r_resp.json()      if r_resp  else []
-    readme   = rd_resp.text[:2500] if rd_resp else "README unavailable."
+    profile = p_resp.json()       if p_resp  else {}
+    repos   = r_resp.json()       if r_resp  else []
+    readme  = rd_resp.text[:2500] if rd_resp else "README unavailable."
 
     ms = (time.perf_counter() - t0) * 1000
     log_gh.info(
@@ -107,8 +114,8 @@ def fetch_github_context() -> str:
         owned = [r for r in repos if not r.get("fork")]
         log_gh.info(f"Found {len(owned)} non-fork repos")
         for r in owned:
-            desc = f" — {r['description']}" if r.get("description") else ""
-            lang = f" [{r['language']}]" if r.get("language") else ""
+            desc  = f" — {r['description']}" if r.get("description") else ""
+            lang  = f" [{r['language']}]"    if r.get("language")    else ""
             stars = f" ★{r['stargazers_count']}" if r.get("stargazers_count") else ""
             lines.append(f"• {r['name']}{lang}{stars}: {r['html_url']}{desc}")
     else:
@@ -118,6 +125,7 @@ def fetch_github_context() -> str:
     _github_cache["data"]       = context
     _github_cache["fetched_at"] = now
     return context
+
 
 def _system_prompt(context: str) -> str:
     return f"""You are **Ani**, a sharp, charming AI assistant built by Cid Kageno and maintained by Shadow-Garden.inc.
@@ -141,6 +149,7 @@ RESPONSE RULES
 6. Never fabricate data. If context is unavailable, say so honestly.
 """
 
+
 def get_gemini_response(prompt: str) -> str | None:
     keys = Config.GOOGLE_API_KEYS
     if not keys:
@@ -150,20 +159,18 @@ def get_gemini_response(prompt: str) -> str | None:
     log.info(f"Request: '{prompt[:80]}{'...' if len(prompt) > 80 else ''}'")
     t0 = time.perf_counter()
 
-    context       = fetch_github_context()
-    sys_prompt    = _system_prompt(context)
-    max_attempts  = len(keys)
+    context      = fetch_github_context()
+    sys_prompt   = _system_prompt(context)
+    max_attempts = len(keys)
 
     for attempt in range(max_attempts):
         try:
             log.debug(f"Attempt {attempt + 1}/{max_attempts} using key #{_key_index + 1}")
-            model = genai.GenerativeModel(
-                model_name=Config.GEMINI_MODEL,
-                system_instruction=sys_prompt,
-            )
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
+            response = _client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_prompt,
                     temperature=Config.GEMINI_TEMP,
                     max_output_tokens=Config.GEMINI_MAX_TOKENS,
                 ),
