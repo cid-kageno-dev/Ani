@@ -50,3 +50,35 @@ GOOGLE_API_KEY3="AIzaSyD-YourThirdKey..."
 # --- GOOGLE SHEETS (Optional) ---
 SHEET_NAME="Ani_Logs"
 GOOGLE_SHEET_CREDS="credits.json"
+
+# --- DATABASE (Firebase Firestore recommended) ---
+DATABASE_BACKEND="auto"
+FIREBASE_CREDENTIALS="firebase-service-account.json"
+FIREBASE_COLLECTION="chat_interactions"
+
+# Optional: PostgreSQL fallback/legacy backend
+DATABASE_URL="postgresql://user:password@host:5432/database"
+```
+
+### Firebase setup
+
+Ani can use **Firebase Firestore** as its chat-history database. Set `DATABASE_BACKEND="firebase"` to force Firestore, or keep `DATABASE_BACKEND="auto"` to use Firebase whenever Firebase credentials are present and fall back to PostgreSQL when only `DATABASE_URL` is set.
+
+Supported Firebase configuration options:
+
+| Variable | Purpose |
+|----------|---------|
+| `FIREBASE_CREDENTIALS` | Path to a Firebase service-account JSON file. |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Inline service-account JSON for hosts that store secrets as environment values. |
+| `FIREBASE_PROJECT_ID` | Project id for application-default credentials. |
+| `FIREBASE_DATABASE_URL` | Optional Firebase database URL used during Admin SDK initialization. |
+| `FIREBASE_COLLECTION` | Firestore collection for chat interactions. Defaults to `chat_interactions`. |
+
+Firestore documents use this shape:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `user_query` | string | User's message. |
+| `ai_response` | string | Ani's response. |
+| `source` | string | `AI Response` or `Database`. |
+| `created_at` | timestamp | Server timestamp written by Firebase. |

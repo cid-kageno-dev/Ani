@@ -53,7 +53,8 @@ def chat():
 @main.route("/history", methods=["GET"])
 @cross_origin()
 def history():
-    limit = min(request.args.get("limit", 20, type=int), 100)
+    requested_limit = request.args.get("limit", 20, type=int) or 20
+    limit = max(1, min(requested_limit, 100))
     log.info(f"GET /history?limit={limit}")
     rows = get_recent_interactions(limit=limit)
     return jsonify([
