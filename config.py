@@ -26,7 +26,13 @@ class Config:
     DATABASE_BACKEND: str = os.getenv("DATABASE_BACKEND", "auto")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-    FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")
+    _fb_creds_env = os.getenv("FIREBASE_CREDENTIALS", "")
+    _fb_key_file  = "firebase-key.json"
+    FIREBASE_CREDENTIALS: str = (
+        _fb_creds_env if _fb_creds_env
+        else _fb_key_file if os.path.isfile(_fb_key_file)
+        else ""
+    )
     FIREBASE_SERVICE_ACCOUNT_JSON: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "")
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")

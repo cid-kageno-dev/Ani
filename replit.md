@@ -12,7 +12,7 @@ A Flask-based context-aware chatbot that answers questions as "Ani", fetching li
 
 - Python 3.12
 - Flask + Flask-CORS
-- google-generativeai (Gemini 2.5 Flash)
+- google-genai (Gemini 2.5 Flash)
 - psycopg2-binary (PostgreSQL via Replit DB)
 - firebase-admin (optional Firebase/Firestore backend)
 - thefuzz (fuzzy fallback matching)
