@@ -23,7 +23,14 @@ class Config:
         if _single:
             GOOGLE_API_KEYS.append(_single)
 
+    DATABASE_BACKEND: str = os.getenv("DATABASE_BACKEND", "auto")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
+    FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "")
+    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")
+    FIREBASE_COLLECTION: str = os.getenv("FIREBASE_COLLECTION", "chat_interactions")
 
     GITHUB_USERNAME: str = os.getenv("GITHUB_USERNAME", "cid-kageno-dev")
     GITHUB_CACHE_TTL: int = int(os.getenv("GITHUB_CACHE_TTL", "300"))
@@ -39,7 +46,17 @@ class Config:
     else:
         log.warning("No Gemini API keys found — AI responses will be unavailable")
 
+    log.info(f"Database backend preference: {DATABASE_BACKEND}")
+
+    if FIREBASE_CREDENTIALS or FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID:
+        log.info(f"Firebase configured — collection '{FIREBASE_COLLECTION}'")
+    else:
+        log.warning("Firebase not configured")
+
     if DATABASE_URL:
         log.info("DATABASE_URL is set")
     else:
-        log.warning("DATABASE_URL not set — database features will be unavailable")
+        log.warning("DATABASE_URL not set")
+
+    if not (DATABASE_URL or FIREBASE_CREDENTIALS or FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID):
+        log.warning("No database backend configured — database features will be unavailable")
