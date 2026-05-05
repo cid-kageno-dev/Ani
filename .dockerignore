@@ -1,0 +1,12 @@
+.env
+firebase-key.json
+.gitignore
+.dockerignore
+__pycache__/
+*.py[cod]
+*.log
+.venv/
+venv/
+env/
+.DS_Store
+Thumbs.db
