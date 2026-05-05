@@ -1,81 +1,60 @@
-# Ani - AI Assistant
+# Ani — AI Assistant
 
-A context-aware AI chatbot that showcases developer projects, handles professional inquiries, and automates portfolio interactions. Developed by Cid Kageno, maintained by Shadow-Garden.inc.
+A Flask-based context-aware chatbot that answers questions as "Ani", fetching live GitHub profile data and using Google Gemini for responses, with PostgreSQL fallback storage and fuzzy-match cached answers.
 
-## Architecture
+## Run & Operate
 
-- **Backend:** Python / Flask (port 5000, `0.0.0.0`)
-- **Frontend:** Jinja2 HTML template (`templates/index.html`)
-- **AI:** Google Gemini (`gemini-2.5-flash`) via `google-generativeai`
-- **Database:** Firebase Firestore via `firebase-admin` with PostgreSQL fallback via `psycopg2`
-- **Entry point:** `run.py` → `app/__init__.py` (factory pattern)
+- **Run**: `python run.py` (port 5000)
+- **Required secrets**: `GOOGLE_API_KEY` (Google Gemini API key)
+- **Auto-provided**: `DATABASE_URL`, `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPORT`
 
-## Project Layout
+## Stack
 
-```
-run.py                      # App entry point
-config.py                   # API key rotation config
-app/
-  __init__.py               # Flask app factory (sets template_folder to root /templates)
-  routes.py                 # Routes: GET /, POST /chat, GET /history
-  services/
-    ai_service.py           # Gemini AI + GitHub data fetching + key rotation
-    db_service.py           # Firebase/PostgreSQL: save_interaction, get_fallback_answer, get_recent_interactions
-    sheet_service.py        # Legacy Google Sheets service (kept for reference)
-    github_service.py       # GitHub data helpers
-templates/
-  index.html                # Chat UI (dark theme, vanilla JS)
-requirements.txt
-```
+- Python 3.12
+- Flask + Flask-CORS
+- google-generativeai (Gemini 2.5 Flash)
+- psycopg2-binary (PostgreSQL via Replit DB)
+- firebase-admin (optional Firebase/Firestore backend)
+- thefuzz (fuzzy fallback matching)
+- gunicorn (for production deployment)
 
-## Database Schema
+## Where things live
 
-Ani supports Firebase Firestore as the preferred database and PostgreSQL as a fallback/legacy backend.
+- `run.py` — entry point
+- `config.py` — all config/env loading
+- `app/__init__.py` — Flask app factory
+- `app/routes.py` — HTTP endpoints (`/`, `/chat`, `/history`, `/stats`, `/health`)
+- `app/services/ai_service.py` — Gemini calls + GitHub context fetching
+- `app/services/db_service.py` — PostgreSQL/Firebase storage, fallback answers, stats
+- `app/logger.py` — colored console logging
+- `templates/index.html` — chat UI (Jinja2 + vanilla JS)
 
-**Firestore collection: `chat_interactions`**
-| Field | Type | Notes |
-|-------|------|-------|
-| user_query | string | User's message |
-| ai_response | string | Ani's response |
-| source | string | "AI Response" or "Database" |
-| created_at | timestamp | Firebase server timestamp |
+## Architecture decisions
 
-**PostgreSQL table: `chat_interactions`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL PK | Auto-increment |
-| user_query | TEXT | User's message |
-| ai_response | TEXT | Ani's response |
-| source | VARCHAR(50) | "AI Response" or "Database" |
-| created_at | TIMESTAMP | Defaults to NOW() |
+- DB backend auto-detected: Firebase if configured, else Postgres if `DATABASE_URL` set
+- Gemini API key rotation: supports `GOOGLE_API_KEY1`, `GOOGLE_API_KEY2`, ... or single `GOOGLE_API_KEY`
+- GitHub context is cached in-memory with configurable TTL (default 300s) to avoid rate limits
+- AI fallback: if Gemini fails, fuzzy-matches user query against stored interactions (threshold: score > 75)
+- DB interactions saved in background threads to avoid blocking HTTP responses
 
-## API Endpoints
+## Product
 
-- `GET /` — Serves the chat UI
-- `POST /chat` — Accepts `{"message": "..."}`, returns `{"response": "...", "source": "..."}`
-- `GET /history?limit=20` — Returns recent chat interactions from the database
+- Chat UI served at `/` — users can ask questions about Cid Kageno
+- Ani answers using live GitHub profile, repos, and README as context
+- Falls back to cached DB answers if Gemini is unavailable
+- History and stats available via `/history` and `/stats`
 
-## Key Features
+## User preferences
 
-- **API Key Rotation:** Cycles through `GOOGLE_API_KEY1`, `GOOGLE_API_KEY2`, etc.
-- **GitHub Live Data:** Fetches real-time repo and profile data (5-minute cache)
-- **DB Fallback:** When Gemini is unavailable, fuzzy-matches past interactions from Firebase Firestore or PostgreSQL
-- **Background Saving:** All interactions are saved to the DB in a background thread (non-blocking)
+_Populate as you build_
 
-## Environment Variables
+## Gotchas
 
-| Variable | Purpose |
-|----------|---------|
-| `GOOGLE_API_KEY1` | Primary Gemini API key (add more as KEY2, KEY3, etc.) |
-| `DATABASE_BACKEND` | `auto`, `firebase`, or `postgres` |
-| `FIREBASE_CREDENTIALS` | Path to Firebase service-account JSON |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | Inline Firebase service-account JSON secret |
-| `FIREBASE_PROJECT_ID` | Firebase project id for application-default credentials |
-| `FIREBASE_COLLECTION` | Firestore collection name (defaults to `chat_interactions`) |
-| `DATABASE_URL` | Optional PostgreSQL fallback connection string |
-| `SHEET_NAME` | (Optional) Legacy Google Sheets name |
-| `GOOGLE_SHEET_CREDS` | (Optional) Path to Google Sheets credentials JSON |
+- `google.generativeai` package shows a FutureWarning (deprecated); works fine for now but should be migrated to `google.genai` eventually
+- Firebase is optional — app works fully with just Postgres (Replit's built-in DB)
+- `DATABASE_URL` is runtime-managed by Replit — do not override it
 
-## Workflow
+## Pointers
 
-- **Start application:** `python run.py` → port 5000 (webview)
+- [Gemini API keys](https://aistudio.google.com/apikey)
+- [google-generativeai migration guide](https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md)
