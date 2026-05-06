@@ -1,16 +1,8 @@
 flask
-python-dotenv
-google-genai
-thefuzz
-gunicorn
-flask-cors
-psycopg2-binary
-firebase-admin
-firebase-admin
-flask
 flask-cors
 google-genai
 gunicorn
 psycopg2-binary
 python-dotenv
 thefuzz
+firebase-admin
