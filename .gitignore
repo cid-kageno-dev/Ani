@@ -17,6 +17,11 @@ build/
 venv/
 env/
 
+# Replit
+.pythonlibs/
+.cache/
+.upm/
+
 # Logs
 *.log
 
