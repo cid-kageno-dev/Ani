@@ -1,6 +1,5 @@
 import logging
 import sys
-import os
 
 RESET  = "\033[0m"
 BOLD   = "\033[1m"
@@ -38,14 +37,16 @@ NAME_COLORS = {
     "ani.ai":      BRIGHT_MAGENTA,
     "ani.db":      BRIGHT_BLUE,
     "ani.github":  CYAN,
+    "ani.chat":    BRIGHT_WHITE,
 }
+
 
 class AniFormatter(logging.Formatter):
     def format(self, record):
-        ts      = self.formatTime(record, "%H:%M:%S")
-        level   = record.levelname.ljust(8)
-        name    = record.name.replace("ani.", "").ljust(8)
-        msg     = record.getMessage()
+        ts    = self.formatTime(record, "%H:%M:%S")
+        level = record.levelname.ljust(8)
+        name  = record.name.replace("ani.", "").ljust(8)
+        msg   = record.getMessage()
 
         lc = LEVEL_COLORS.get(record.levelname, WHITE)
         nc = NAME_COLORS.get(record.name, DIM + WHITE)
@@ -55,7 +56,7 @@ class AniFormatter(logging.Formatter):
         name_str  = f"{nc}[{name.strip()}]{RESET}"
         msg_str   = msg
 
-        if record.levelname == "ERROR" or record.levelname == "CRITICAL":
+        if record.levelname in ("ERROR", "CRITICAL"):
             msg_str = f"{BRIGHT_RED}{msg}{RESET}"
         elif record.levelname == "WARNING":
             msg_str = f"{BRIGHT_YELLOW}{msg}{RESET}"
@@ -94,3 +95,23 @@ def setup_logging(level: str = "INFO"):
     werkzeug_log.addHandler(handler)
     werkzeug_log.propagate = False
     werkzeug_log.setLevel(logging.INFO)
+
+
+def divider(char: str = "─", width: int = 52):
+    print(f"{DIM}{char * width}{RESET}", flush=True)
+
+
+def log_box(lines: list[str], color: str = BRIGHT_CYAN, width: int = 52):
+    border = f"{color}{BOLD}{'═' * width}{RESET}"
+    print(border, flush=True)
+    for line in lines:
+        padded = line.ljust(width - 2)
+        print(f"{color}{BOLD}║{RESET} {padded} {color}{BOLD}║{RESET}", flush=True)
+    print(border, flush=True)
+
+
+def log_status(label: str, ok: bool, detail: str = ""):
+    icon  = f"{BRIGHT_GREEN}✓{RESET}" if ok else f"{BRIGHT_RED}✗{RESET}"
+    label_str = f"{BRIGHT_WHITE}{label:<18}{RESET}"
+    detail_str = f"{DIM}{detail}{RESET}" if detail else ""
+    print(f"  {icon}  {label_str}  {detail_str}", flush=True)
