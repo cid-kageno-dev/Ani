@@ -33,3 +33,9 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+FIREBASE_PROJECT_ID = "gen-lang-client-0109922552"
+FIREBASE_DATABASE_URL = "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app"
