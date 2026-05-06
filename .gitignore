@@ -1,6 +1,5 @@
 # Credentials & secrets
 .env
-firebase-key.json
 
 # Python
 __pycache__/
