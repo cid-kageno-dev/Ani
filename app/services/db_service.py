@@ -97,7 +97,10 @@ def _get_firestore():
     firebase_admin, credentials, firestore = _firebase_modules()
 
     if Config.FIREBASE_SERVICE_ACCOUNT_JSON:
-        cred = credentials.Certificate(json.loads(Config.FIREBASE_SERVICE_ACCOUNT_JSON))
+        sa_info = json.loads(Config.FIREBASE_SERVICE_ACCOUNT_JSON)
+        if "private_key" in sa_info:
+            sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
+        cred = credentials.Certificate(sa_info)
     elif Config.FIREBASE_CREDENTIALS:
         cred = credentials.Certificate(Config.FIREBASE_CREDENTIALS)
     else:
