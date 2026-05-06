@@ -1,8 +1,6 @@
 import os
-from dotenv import load_dotenv
 from app.logger import get_logger, setup_logging
 
-load_dotenv()
 setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
 log = get_logger("ani.config")
