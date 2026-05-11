@@ -1,0 +1,33 @@
+# Version control
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pycache
+
+# Environment files (secrets must come from the environment, not the image)
+.env
+.env.*
+!.env.example
+
+# Local agent & editor state
+.local/
+.replit
+replit.nix
+replit.md
+
+# Development tooling
+*.md
+!README.md
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Firebase key (injected via FIREBASE_SERVICE_ACCOUNT_JSON at runtime)
+firebase-key.json

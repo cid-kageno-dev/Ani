@@ -1,39 +1,60 @@
 import importlib
 import importlib.util
 import json
+import threading
 import time
 from datetime import datetime, timezone
+from typing import Any
 
-from psycopg2 import pool
 import psycopg2.extras
+from psycopg2 import pool
 from thefuzz import process
 
 from config import Config
 from app.logger import get_logger
 
-log = get_logger("ani.db")
+log        = get_logger("ani.db")
+log_render = get_logger("ani.render")
 
-_pool: pool.ThreadedConnectionPool | None = None
+# ── Connection pools ──────────────────────────────────────────────────────
+_pool:        pool.ThreadedConnectionPool | None = None
 _render_pool: pool.ThreadedConnectionPool | None = None
-_firestore_client = None
-_firebase_ready = False
-_firebase_admin = None
-_firebase_credentials = None
-_firebase_firestore = None
 
+# ── Firebase state ────────────────────────────────────────────────────────
+_firestore_client   = None
+_firebase_ready     = False
+_firebase_admin     = None
+_firebase_creds_mod = None
+_firebase_fs_mod    = None
+
+# ── Schema SQL ────────────────────────────────────────────────────────────
+_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS chat_interactions (
+        id          SERIAL PRIMARY KEY,
+        user_query  TEXT         NOT NULL,
+        ai_response TEXT         NOT NULL,
+        source      VARCHAR(50)  DEFAULT 'AI Response',
+        created_at  TIMESTAMP    DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_created
+        ON chat_interactions(created_at DESC);
+"""
+
+
+# ── Firebase helpers ──────────────────────────────────────────────────────
 
 def _firebase_modules():
-    global _firebase_admin, _firebase_credentials, _firebase_firestore
-    if _firebase_admin and _firebase_credentials and _firebase_firestore:
-        return _firebase_admin, _firebase_credentials, _firebase_firestore
+    global _firebase_admin, _firebase_creds_mod, _firebase_fs_mod
+    if _firebase_admin and _firebase_creds_mod and _firebase_fs_mod:
+        return _firebase_admin, _firebase_creds_mod, _firebase_fs_mod
 
     if importlib.util.find_spec("firebase_admin") is None:
         raise RuntimeError("firebase-admin is not installed")
 
-    _firebase_admin = importlib.import_module("firebase_admin")
-    _firebase_credentials = importlib.import_module("firebase_admin.credentials")
-    _firebase_firestore = importlib.import_module("firebase_admin.firestore")
-    return _firebase_admin, _firebase_credentials, _firebase_firestore
+    _firebase_admin     = importlib.import_module("firebase_admin")
+    _firebase_creds_mod = importlib.import_module("firebase_admin.credentials")
+    _firebase_fs_mod    = importlib.import_module("firebase_admin.firestore")
+    return _firebase_admin, _firebase_creds_mod, _firebase_fs_mod
 
 
 def _firebase_configured() -> bool:
@@ -57,19 +78,7 @@ def _backend() -> str | None:
     return None
 
 
-def _empty_stats() -> dict:
-    return {
-        "total": 0,
-        "ai_responses": 0,
-        "fallback_responses": 0,
-        "first_interaction": None,
-        "last_interaction": None,
-    }
-
-
-def _normalize_datetime(value):
-    if value is None:
-        return datetime.now(timezone.utc)
+def _normalize_dt(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
     return datetime.now(timezone.utc)
@@ -78,11 +87,11 @@ def _normalize_datetime(value):
 def _doc_to_interaction(doc) -> dict:
     data = doc.to_dict() or {}
     return {
-        "id": doc.id,
-        "user_query": data.get("user_query", ""),
+        "id":          doc.id,
+        "user_query":  data.get("user_query", ""),
         "ai_response": data.get("ai_response", ""),
-        "source": data.get("source", "AI Response"),
-        "created_at": _normalize_datetime(data.get("created_at")),
+        "source":      data.get("source", "AI Response"),
+        "created_at":  _normalize_dt(data.get("created_at")),
     }
 
 
@@ -94,7 +103,6 @@ def _get_firestore():
     if not _firebase_configured():
         raise RuntimeError("Firebase is not configured")
 
-    cred = None
     firebase_admin, credentials, firestore = _firebase_modules()
 
     if Config.FIREBASE_SERVICE_ACCOUNT_JSON:
@@ -107,7 +115,7 @@ def _get_firestore():
     else:
         cred = credentials.ApplicationDefault()
 
-    options = {}
+    options: dict = {}
     if Config.FIREBASE_DATABASE_URL:
         options["databaseURL"] = Config.FIREBASE_DATABASE_URL
     if Config.FIREBASE_PROJECT_ID:
@@ -119,7 +127,7 @@ def _get_firestore():
         app = firebase_admin.initialize_app(cred, options or None)
 
     _firestore_client = firestore.client(app=app)
-    _firebase_ready = True
+    _firebase_ready   = True
     log.info(f"Firebase Firestore ready — collection '{Config.FIREBASE_COLLECTION}'")
     return _firestore_client
 
@@ -128,14 +136,16 @@ def _firebase_collection():
     return _get_firestore().collection(Config.FIREBASE_COLLECTION)
 
 
+# ── PostgreSQL helpers ────────────────────────────────────────────────────
+
 def _get_pool() -> pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         if not Config.DATABASE_URL:
             raise RuntimeError("DATABASE_URL is not configured")
-        log.info("Initializing DB connection pool (min=1, max=5)")
+        log.info("Initializing primary DB pool (min=1, max=5)")
         _pool = pool.ThreadedConnectionPool(1, 5, Config.DATABASE_URL)
-        log.info("DB connection pool ready")
+        log.info("Primary DB pool ready")
     return _pool
 
 
@@ -144,9 +154,9 @@ def _get_render_pool() -> pool.ThreadedConnectionPool:
     if _render_pool is None:
         if not Config.RENDER_DATABASE_URL:
             raise RuntimeError("RENDER_DATABASE_URL is not configured")
-        log.info("Initializing Render DB connection pool (min=1, max=5)")
+        log_render.info("Initializing Render DB pool (min=1, max=5)")
         _render_pool = pool.ThreadedConnectionPool(1, 5, Config.RENDER_DATABASE_URL)
-        log.info("Render DB connection pool ready")
+        log_render.info("Render DB pool ready")
     return _render_pool
 
 
@@ -154,7 +164,7 @@ def _conn():
     return _get_pool().getconn()
 
 
-def _put(conn):
+def _put(conn) -> None:
     if conn and _pool is not None:
         _pool.putconn(conn)
 
@@ -163,37 +173,27 @@ def _render_conn():
     return _get_render_pool().getconn()
 
 
-def _render_put(conn):
+def _render_put(conn) -> None:
     if conn and _render_pool is not None:
         _render_pool.putconn(conn)
 
 
-_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS chat_interactions (
-        id         SERIAL PRIMARY KEY,
-        user_query TEXT        NOT NULL,
-        ai_response TEXT       NOT NULL,
-        source     VARCHAR(50) DEFAULT 'AI Response',
-        created_at TIMESTAMP   DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_chat_created
-        ON chat_interactions(created_at DESC);
-"""
-
+# ── Schema init ───────────────────────────────────────────────────────────
 
 def _init_postgres_schema(get_conn, put_conn, label: str) -> bool:
-    log.info(f"Verifying database schema ({label})...")
+    logger = log_render if label == "render" else log
+    logger.info(f"Verifying schema ({label})…")
     conn = None
     try:
         conn = get_conn()
-        cur = conn.cursor()
+        cur  = conn.cursor()
         cur.execute(_SCHEMA_SQL)
         conn.commit()
         cur.close()
-        log.info(f"Schema OK — table 'chat_interactions' ready ({label})")
+        logger.info(f"Schema OK — 'chat_interactions' ready ({label})")
         return True
     except Exception as e:
-        log.error(f"Schema init failed ({label}): {e}")
+        logger.error(f"Schema init failed ({label}): {e}")
         if conn:
             conn.rollback()
         return False
@@ -203,20 +203,21 @@ def _init_postgres_schema(get_conn, put_conn, label: str) -> bool:
 
 def ensure_schema() -> bool:
     backend = _backend()
+
     if backend == "firebase":
         try:
             _get_firestore()
-            log.info("Firebase uses schemaless collections — schema verification skipped")
+            log.info("Firebase — schemaless, schema check skipped")
             return True
         except Exception as e:
-            log.error(f"Firebase initialization failed: {e}")
+            log.error(f"Firebase init failed: {e}")
             return False
 
-    if backend != "postgres":
-        log.warning("Skipping schema verification — no database backend is configured")
-        return False
+    if backend == "postgres":
+        return _init_postgres_schema(_conn, _put, "primary")
 
-    return _init_postgres_schema(_conn, _put, "primary")
+    log.warning("No database backend — schema check skipped")
+    return False
 
 
 def ensure_render_schema() -> bool:
@@ -225,47 +226,26 @@ def ensure_render_schema() -> bool:
     return _init_postgres_schema(_render_conn, _render_put, "render")
 
 
-def _save_interaction_render(user_query: str, ai_response: str, source: str):
-    t0 = time.perf_counter()
-    conn = None
-    try:
-        conn = _render_conn()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO chat_interactions (user_query, ai_response, source) VALUES (%s, %s, %s) RETURNING id",
-            (user_query, ai_response, source),
-        )
-        row_id = cur.fetchone()[0]
-        conn.commit()
-        cur.close()
-        ms = (time.perf_counter() - t0) * 1000
-        log.info(f"Mirrored interaction #{row_id} [{source}] to Render in {ms:.1f}ms")
-    except Exception as e:
-        log.error(f"Failed to mirror interaction to Render: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        _render_put(conn)
+# ── Save interaction ──────────────────────────────────────────────────────
 
-
-def _save_interaction_firebase(user_query: str, ai_response: str, source: str):
+def _save_firebase(user_query: str, ai_response: str, source: str) -> None:
     _, _, firestore = _firebase_modules()
     doc = {
-        "user_query": user_query,
+        "user_query":  user_query,
         "ai_response": ai_response,
-        "source": source,
-        "created_at": firestore.SERVER_TIMESTAMP,
+        "source":      source,
+        "created_at":  firestore.SERVER_TIMESTAMP,
     }
     update_time, ref = _firebase_collection().add(doc)
-    log.info(f"Saved interaction {ref.id} [{source}] to Firebase at {update_time}")
+    log.info(f"Firebase saved {ref.id} [{source}] at {update_time}")
 
 
-def _save_interaction_postgres(user_query: str, ai_response: str, source: str):
-    t0 = time.perf_counter()
+def _save_postgres(user_query: str, ai_response: str, source: str) -> None:
+    t0   = time.perf_counter()
     conn = None
     try:
         conn = _conn()
-        cur = conn.cursor()
+        cur  = conn.cursor()
         cur.execute(
             "INSERT INTO chat_interactions (user_query, ai_response, source) VALUES (%s, %s, %s) RETURNING id",
             (user_query, ai_response, source),
@@ -274,35 +254,73 @@ def _save_interaction_postgres(user_query: str, ai_response: str, source: str):
         conn.commit()
         cur.close()
         ms = (time.perf_counter() - t0) * 1000
-        log.info(f"Saved interaction #{row_id} [{source}] in {ms:.1f}ms")
+        log.info(f"Primary PG saved #{row_id} [{source}] in {ms:.1f}ms")
     except Exception as e:
-        log.error(f"Failed to save interaction: {e}")
+        log.error(f"Primary PG save failed: {e}")
         if conn:
             conn.rollback()
     finally:
         _put(conn)
 
 
-def save_interaction(user_query: str, ai_response: str, source: str = "AI Response"):
+def _save_render(user_query: str, ai_response: str, source: str) -> None:
+    t0   = time.perf_counter()
+    conn = None
+    try:
+        conn = _render_conn()
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO chat_interactions (user_query, ai_response, source) VALUES (%s, %s, %s) RETURNING id",
+            (user_query, ai_response, source),
+        )
+        row_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        ms = (time.perf_counter() - t0) * 1000
+        log_render.info(f"Render PG mirrored #{row_id} [{source}] in {ms:.1f}ms")
+    except Exception as e:
+        log_render.error(f"Render PG mirror failed: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        _render_put(conn)
+
+
+def save_interaction(user_query: str, ai_response: str, source: str = "AI Response") -> None:
     backend = _backend()
+
     if backend == "firebase":
         try:
-            _save_interaction_firebase(user_query, ai_response, source)
+            _save_firebase(user_query, ai_response, source)
         except Exception as e:
-            log.error(f"Failed to save interaction to Firebase: {e}")
+            log.error(f"Firebase save failed: {e}")
     elif backend == "postgres":
-        _save_interaction_postgres(user_query, ai_response, source)
+        _save_postgres(user_query, ai_response, source)
     else:
-        log.debug("Skipping interaction save — no database backend is configured")
+        log.debug("No backend configured — skipping save")
 
     if Config.RENDER_DATABASE_URL:
-        try:
-            _save_interaction_render(user_query, ai_response, source)
-        except Exception as e:
-            log.error(f"Render mirror save failed: {e}")
+        # Mirror to Render in a separate thread so Firebase + Render run in parallel.
+        threading.Thread(
+            target=_save_render,
+            args=(user_query, ai_response, source),
+            daemon=True,
+        ).start()
 
 
-def _get_firebase_rows(limit: int = 500) -> list:
+# ── Fetch rows ────────────────────────────────────────────────────────────
+
+def _empty_stats() -> dict:
+    return {
+        "total":               0,
+        "ai_responses":        0,
+        "fallback_responses":  0,
+        "first_interaction":   None,
+        "last_interaction":    None,
+    }
+
+
+def _firebase_rows(limit: int = 500) -> list:
     _, _, firestore = _firebase_modules()
     docs = (
         _firebase_collection()
@@ -313,11 +331,11 @@ def _get_firebase_rows(limit: int = 500) -> list:
     return [_doc_to_interaction(doc) for doc in docs]
 
 
-def _get_postgres_rows(limit: int = 500) -> list:
+def _postgres_rows(limit: int = 500) -> list:
     conn = None
     try:
         conn = _conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(
             "SELECT id, user_query, ai_response, source, created_at "
             "FROM chat_interactions ORDER BY created_at DESC LIMIT %s",
@@ -327,31 +345,30 @@ def _get_postgres_rows(limit: int = 500) -> list:
         cur.close()
         return rows
     except Exception as e:
-        log.error(f"Failed to fetch interactions: {e}")
+        log.error(f"Primary PG fetch failed: {e}")
         return []
     finally:
         _put(conn)
 
 
+# ── Public query API ──────────────────────────────────────────────────────
+
 def get_fallback_answer(user_query: str) -> str:
     backend = _backend()
     if backend is None:
-        log.warning("Fallback lookup unavailable — no database backend is configured")
-        return "I'm offline right now and don't have a database connection for cached answers. Please try again later."
+        return "I'm offline and have no database connection for cached answers. Please try again later."
 
-    log.info(f"Fallback search for: '{user_query[:60]}'")
+    log.info(f"Fallback search: '{user_query[:60]}'")
     t0 = time.perf_counter()
     try:
-        rows = _get_firebase_rows(500) if backend == "firebase" else _get_postgres_rows(500)
+        rows = _firebase_rows(500) if backend == "firebase" else _postgres_rows(500)
 
         if not rows:
-            log.warning("Fallback DB is empty — no past interactions to match")
-            return "I'm offline right now and don't have any cached answers yet. Please try again later."
+            return "I'm offline and have no cached answers yet. Please try again later."
 
-        past_queries = [r["user_query"] for r in rows]
-        best_match, score = process.extractOne(user_query, past_queries)
-        ms = (time.perf_counter() - t0) * 1000
-
+        past_queries        = [r["user_query"] for r in rows]
+        best_match, score   = process.extractOne(user_query, past_queries)
+        ms                  = (time.perf_counter() - t0) * 1000
         log.info(f"Fuzzy match: '{best_match[:50]}' score={score} in {ms:.1f}ms")
 
         if score > 75:
@@ -359,7 +376,7 @@ def get_fallback_answer(user_query: str) -> str:
                 if row["user_query"] == best_match:
                     return row["ai_response"]
 
-        log.warning(f"No match above threshold (score={score}) — returning generic message")
+        log.warning(f"No match above threshold (score={score})")
         return "I'm currently offline and couldn't find a relevant cached answer. Please try again later."
 
     except Exception as e:
@@ -370,28 +387,43 @@ def get_fallback_answer(user_query: str) -> str:
 def get_recent_interactions(limit: int = 20) -> list:
     backend = _backend()
     if backend is None:
-        log.warning("History unavailable — no database backend is configured")
+        log.warning("History unavailable — no backend configured")
         return []
 
     log.debug(f"Fetching {limit} recent interactions from {backend}")
     if backend == "firebase":
         try:
-            rows = _get_firebase_rows(limit)
-            log.debug(f"Returned {len(rows)} Firebase interactions")
+            rows = _firebase_rows(limit)
+            log.debug(f"Firebase returned {len(rows)} interactions")
             return rows
         except Exception as e:
-            log.error(f"Failed to fetch Firebase interactions: {e}")
+            log.error(f"Firebase history fetch failed: {e}")
             return []
 
-    rows = _get_postgres_rows(limit)
-    log.debug(f"Returned {len(rows)} PostgreSQL interactions")
+    rows = _postgres_rows(limit)
+    log.debug(f"Primary PG returned {len(rows)} interactions")
     return rows
 
 
-def _get_firebase_stats() -> dict:
+def get_stats() -> dict:
+    backend = _backend()
+    if backend is None:
+        log.warning("Stats unavailable — no backend configured")
+        return _empty_stats()
+
+    if backend == "firebase":
+        try:
+            return _firebase_stats()
+        except Exception as e:
+            log.error(f"Firebase stats failed: {e}")
+            return _empty_stats()
+
+    return _postgres_stats()
+
+
+def _firebase_stats() -> dict:
     stats = _empty_stats()
-    docs = _firebase_collection().stream()
-    for doc in docs:
+    for doc in _firebase_collection().stream():
         row = _doc_to_interaction(doc)
         stats["total"] += 1
         if row["source"] == "AI Response":
@@ -399,22 +431,21 @@ def _get_firebase_stats() -> dict:
         elif row["source"] == "Database":
             stats["fallback_responses"] += 1
 
-        created_at = row["created_at"]
+        ts       = row["created_at"].isoformat()
         first_at = stats["first_interaction"]
-        last_at = stats["last_interaction"]
-        created_iso = created_at.isoformat()
-        if first_at is None or created_iso < first_at:
-            stats["first_interaction"] = created_iso
-        if last_at is None or created_iso > last_at:
-            stats["last_interaction"] = created_iso
+        last_at  = stats["last_interaction"]
+        if first_at is None or ts < first_at:
+            stats["first_interaction"] = ts
+        if last_at is None or ts > last_at:
+            stats["last_interaction"] = ts
     return stats
 
 
-def _get_postgres_stats() -> dict:
+def _postgres_stats() -> dict:
     conn = None
     try:
         conn = _conn()
-        cur = conn.cursor()
+        cur  = conn.cursor()
         cur.execute("""
             SELECT
                 COUNT(*)                                            AS total,
@@ -427,30 +458,14 @@ def _get_postgres_stats() -> dict:
         row = cur.fetchone()
         cur.close()
         return {
-            "total": row[0],
-            "ai_responses": row[1],
+            "total":              row[0],
+            "ai_responses":       row[1],
             "fallback_responses": row[2],
-            "first_interaction": row[3].isoformat() if row[3] else None,
-            "last_interaction": row[4].isoformat() if row[4] else None,
+            "first_interaction":  row[3].isoformat() if row[3] else None,
+            "last_interaction":   row[4].isoformat() if row[4] else None,
         }
     except Exception as e:
-        log.error(f"Stats query failed: {e}")
+        log.error(f"Primary PG stats failed: {e}")
         return _empty_stats()
     finally:
         _put(conn)
-
-
-def get_stats() -> dict:
-    backend = _backend()
-    if backend is None:
-        log.warning("Stats unavailable — no database backend is configured")
-        return _empty_stats()
-
-    if backend == "firebase":
-        try:
-            return _get_firebase_stats()
-        except Exception as e:
-            log.error(f"Firebase stats query failed: {e}")
-            return _empty_stats()
-
-    return _get_postgres_stats()
