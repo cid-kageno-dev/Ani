@@ -6,3 +6,12 @@ psycopg2-binary
 python-dotenv
 thefuzz
 firebase-admin
+firebase-admin
+flask
+flask-cors
+google-genai
+gunicorn
+psycopg2-binary
+python-dotenv
+thefuzz
+google-genai

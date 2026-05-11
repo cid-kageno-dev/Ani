@@ -1,7 +1,8 @@
-modules = ["python-3.12", "web", "postgresql-16"]
+modules = ["web", "postgresql-16", "python-3.11"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
+integrations = ["python_gemini_ai_integrations:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
