@@ -98,7 +98,16 @@ def _dt_iso(value) -> str | None:
 @main.route("/")
 def home():
     log.debug("Rendering index.html template")
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        assistant_name    = Config.ASSISTANT_NAME,
+        owner_name        = Config.OWNER_NAME,
+        org_name          = Config.ORG_NAME,
+        owner_tagline     = Config.OWNER_TAGLINE,
+        owner_footer_note = Config.OWNER_FOOTER_NOTE,
+        chat_suggestions  = Config.CHAT_SUGGESTIONS,
+        max_message_length= Config.MAX_MESSAGE_LENGTH,
+    )
 
 
 @main.route("/chat/stream", methods=["POST"])
@@ -239,7 +248,7 @@ def stats():
 @main.route("/health", methods=["GET"])
 def health():
     log.debug("── /health: ok")
-    return jsonify({"status": "ok", "service": "ani"}), 200
+    return jsonify({"status": "ok", "service": Config.ASSISTANT_NAME.lower()}), 200
 
 
 @main.app_errorhandler(404)

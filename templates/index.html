@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ani — AI Assistant</title>
+    <title>{{ assistant_name }} — AI Assistant</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -623,18 +623,18 @@
     </style>
 </head>
 <body>
-    <main class="app-shell" aria-label="Ani chat application">
-        <aside class="panel" aria-label="Ani overview">
+    <main class="app-shell" aria-label="{{ assistant_name }} chat application">
+        <aside class="panel" aria-label="{{ assistant_name }} overview">
             <div>
                 <section class="brand-card">
                     <div class="brand-lockup">
                         <div class="avatar" aria-hidden="true">✦</div>
                         <div>
-                            <div class="eyebrow">Shadow-Garden.inc</div>
-                            <h1 class="brand-name">Meet Ani</h1>
+                            {% if org_name %}<div class="eyebrow">{{ org_name }}</div>{% endif %}
+                            <h1 class="brand-name">Meet {{ assistant_name }}</h1>
                         </div>
                     </div>
-                    <p class="brand-copy">A polished portfolio assistant for Cid Kageno — fast answers, live GitHub context, and cached fallback knowledge when AI is unavailable.</p>
+                    <p class="brand-copy">{{ owner_tagline }}</p>
                 </section>
 
                 <div class="stats-grid" aria-label="Highlights">
@@ -646,22 +646,22 @@
 
                 <div class="hint-stack">
                     <div class="hint"><span class="hint-icon">⌘</span><span>Press <strong>Enter</strong> to send, or <strong>Shift + Enter</strong> for a new line.</span></div>
-                    <div class="hint"><span class="hint-icon">↗</span><span>Ani formats links, lists, and highlights so project answers stay easy to scan.</span></div>
+                    <div class="hint"><span class="hint-icon">↗</span><span>{{ assistant_name }} formats links, lists, and highlights so answers stay easy to scan.</span></div>
                     <div class="hint"><span class="hint-icon">◎</span><span>Fallback replies are labeled when they come from cached database memory.</span></div>
                 </div>
             </div>
-            <p class="footer-note">Designed for recruiters, collaborators, and anyone exploring Cid's work.</p>
+            <p class="footer-note">{{ owner_footer_note }}</p>
         </aside>
 
-        <section class="chat-container" aria-label="Chat with Ani">
+        <section class="chat-container" aria-label="Chat with {{ assistant_name }}">
             <header class="chat-header">
                 <div class="avatar" aria-hidden="true">✦</div>
                 <div class="header-info">
                     <div class="header-name-row">
-                        <div class="header-name">Ani</div>
+                        <div class="header-name">{{ assistant_name }}</div>
                         <div class="status-pill"><span class="status-dot"></span><span id="status-label">Online</span></div>
                     </div>
-                    <div class="header-status">AI Assistant by Shadow-Garden.inc · Ask about projects, skills, contact, or GitHub.</div>
+                    <div class="header-status">AI Assistant{% if org_name %} by {{ org_name }}{% endif %} · Ask about projects, skills, contact, or GitHub.</div>
                 </div>
                 <div class="header-actions">
                     <button class="ghost-btn" type="button" onclick="clearChat()">Clear</button>
@@ -673,7 +673,7 @@
                 <div class="msg-row bot">
                     <div class="msg-avatar" aria-hidden="true">✦</div>
                     <div class="msg-stack">
-                        <div class="msg-bubble">Hey there! I'm <strong>Ani</strong> 💜 — your guide to everything about Cid Kageno's work. Ask me about projects, skills, GitHub, or how to get in touch.</div>
+                        <div class="msg-bubble">Hey there! I'm <strong>{{ assistant_name }}</strong> 💜 — your guide to everything about <strong>{{ owner_name }}</strong>'s work. Ask me about projects, skills, GitHub, or how to get in touch.</div>
                         <div class="msg-meta">Just now</div>
                     </div>
                 </div>
@@ -681,14 +681,13 @@
 
             <footer class="composer">
                 <div class="suggestions" id="suggestions" aria-label="Suggested questions">
-                    <button class="chip" type="button" onclick="quickAsk(this)">What projects has Cid built?</button>
-                    <button class="chip" type="button" onclick="quickAsk(this)">What's his tech stack?</button>
-                    <button class="chip" type="button" onclick="quickAsk(this)">How can I contact him?</button>
-                    <button class="chip" type="button" onclick="quickAsk(this)">Show his recent GitHub work</button>
+                    {% for suggestion in chat_suggestions %}
+                    <button class="chip" type="button" onclick="quickAsk(this)">{{ suggestion }}</button>
+                    {% endfor %}
                 </div>
 
                 <div class="input-area">
-                    <textarea id="user-input" placeholder="Ask me anything…" autocomplete="off" rows="1" maxlength="1200" aria-label="Message"></textarea>
+                    <textarea id="user-input" placeholder="Ask me anything…" autocomplete="off" rows="1" maxlength="{{ max_message_length }}" aria-label="Message"></textarea>
                     <button class="send-btn" id="send-btn" type="button" onclick="sendMessage()" title="Send message" aria-label="Send message">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -698,7 +697,7 @@
                 </div>
                 <div class="composer-meta">
                     <span>Enter to send · Shift + Enter for newline</span>
-                    <span id="char-count">0 / 1200</span>
+                    <span id="char-count">0 / {{ max_message_length }}</span>
                 </div>
             </footer>
         </section>
@@ -707,13 +706,17 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
-    const chatBox = document.getElementById('chat-box');
-    const input = document.getElementById('user-input');
-    const sendBtn = document.getElementById('send-btn');
-    const suggestions = document.getElementById('suggestions');
-    const statusLabel = document.getElementById('status-label');
-    const charCount = document.getElementById('char-count');
-    const toast = document.getElementById('toast');
+    const ASSISTANT_NAME      = {{ assistant_name | tojson }};
+    const OWNER_NAME          = {{ owner_name | tojson }};
+    const MAX_MESSAGE_LENGTH  = {{ max_message_length }};
+
+    const chatBox    = document.getElementById('chat-box');
+    const input      = document.getElementById('user-input');
+    const sendBtn    = document.getElementById('send-btn');
+    const suggestions= document.getElementById('suggestions');
+    const statusLabel= document.getElementById('status-label');
+    const charCount  = document.getElementById('char-count');
+    const toast      = document.getElementById('toast');
 
     input.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -725,7 +728,7 @@
     input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
-        charCount.textContent = `${input.value.length} / 1200`;
+        charCount.textContent = `${input.value.length} / ${MAX_MESSAGE_LENGTH}`;
     });
 
     function quickAsk(el) {
@@ -852,7 +855,7 @@
         const bubble = document.createElement('div');
         bubble.className = 'typing-bubble';
         bubble.innerHTML = '<span></span><span></span><span></span>';
-        bubble.setAttribute('aria-label', 'Ani is typing');
+        bubble.setAttribute('aria-label', `${ASSISTANT_NAME} is typing`);
 
         row.appendChild(av);
         row.appendChild(bubble);
@@ -876,7 +879,7 @@
             <div class="msg-row bot">
                 <div class="msg-avatar" aria-hidden="true">✦</div>
                 <div class="msg-stack">
-                    <div class="msg-bubble">Fresh slate. What would you like to know about <strong>Cid Kageno</strong>?</div>
+                    <div class="msg-bubble">Fresh slate. What would you like to know about <strong>${OWNER_NAME}</strong>?</div>
                     <div class="msg-meta">${getTime()}</div>
                 </div>
             </div>
@@ -905,12 +908,12 @@
 
             if (!res.ok) throw new Error('Server error');
 
-            const reader = res.body.getReader();
+            const reader  = res.body.getReader();
             const decoder = new TextDecoder();
-            let buffer = '';
-            let bubble = null;
+            let buffer  = '';
+            let bubble  = null;
             let rawText = '';
-            let source = 'AI Response';
+            let source  = 'AI Response';
             let started = false;
 
             while (true) {

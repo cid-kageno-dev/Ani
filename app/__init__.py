@@ -58,18 +58,17 @@ def _check_connections() -> dict:
 
 
 def create_app() -> Flask:
+    from config import Config
+
     template_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "templates")
     )
     app = Flask(__name__, template_folder=template_dir)
     CORS(app)
 
-    log_box([
-        "  Ani — AI Assistant",
-        "  Shadow-Garden.inc",
-        "",
-        "  Booting up…",
-    ])
+    title_line  = f"  {Config.ASSISTANT_NAME} — AI Assistant"
+    org_line    = f"  {Config.ORG_NAME}" if Config.ORG_NAME else f"  for {Config.OWNER_NAME}"
+    log_box([title_line, org_line, "", "  Booting up…"])
 
     primary_schema_ok = ensure_schema()
     render_schema_ok  = ensure_render_schema()

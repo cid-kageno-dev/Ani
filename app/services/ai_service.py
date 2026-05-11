@@ -22,14 +22,15 @@ _client:    genai.Client | None = None
 _gh_lock:  threading.Lock = threading.Lock()
 _gh_cache: dict           = {"data": None, "fetched_at": 0.0}
 
-# ── Static contact info ───────────────────────────────────────────────────
 
-def _static_contact() -> dict:
+# ── Contact info (from config) ────────────────────────────────────────────
+
+def _contact() -> dict:
     return {
-        "email":    "cidkageno105@gmail.com",
-        "website":  "https://cid-kageno.top",
-        "facebook": "https://www.facebook.com/share/17di5vpqBZ/",
-        "github":   f"https://github.com/{Config.GITHUB_USERNAME}",
+        "email":    Config.OWNER_EMAIL,
+        "website":  Config.OWNER_WEBSITE,
+        "facebook": Config.OWNER_FACEBOOK,
+        "github":   f"https://github.com/{Config.GITHUB_USERNAME}" if Config.GITHUB_USERNAME else "",
     }
 
 
@@ -82,6 +83,10 @@ def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
 
 
 def fetch_github_context() -> str:
+    if not Config.GITHUB_USERNAME:
+        log_gh.warning("GITHUB_USERNAME not configured — skipping GitHub fetch")
+        return "(GitHub context not available — GITHUB_USERNAME is not set)"
+
     now = time.time()
     ttl = Config.GITHUB_CACHE_TTL
 
@@ -134,22 +139,24 @@ def fetch_github_context() -> str:
         f"readme={'ok (' + str(len(readme)) + 'B)' if rd_resp else 'miss'}"
     )
 
-    contact = _static_contact()
-    lines = [
-        "=== CONTACT INFO ===",
-        f"Full Name   : Cid Kageno",
-        f"GitHub      : {contact['github']}  (handle: {profile.get('login', username)})",
-        f"Email       : {contact['email']}",
-        f"Website     : {contact['website']}",
-        f"Facebook    : {contact['facebook']}",
-        f"Followers   : {profile.get('followers', 'N/A')}",
-        f"Public Repos: {profile.get('public_repos', 'N/A')}",
-        "",
-        "=== BIO & TECH STACK ===",
-        readme,
-        "",
-        "=== RECENT PROJECTS ===",
-    ]
+    contact = _contact()
+    lines   = ["=== CONTACT INFO ==="]
+
+    lines.append(f"Full Name   : {Config.OWNER_NAME}")
+    if contact["github"]:
+        lines.append(f"GitHub      : {contact['github']}  (handle: {profile.get('login', username)})")
+    if contact["email"]:
+        lines.append(f"Email       : {contact['email']}")
+    if contact["website"]:
+        lines.append(f"Website     : {contact['website']}")
+    if contact["facebook"]:
+        lines.append(f"Facebook    : {contact['facebook']}")
+    if profile.get("followers") is not None:
+        lines.append(f"Followers   : {profile.get('followers', 'N/A')}")
+    if profile.get("public_repos") is not None:
+        lines.append(f"Public Repos: {profile.get('public_repos', 'N/A')}")
+
+    lines += ["", "=== BIO & TECH STACK ===", readme, "", "=== RECENT PROJECTS ==="]
 
     if isinstance(repos, list):
         owned = [r for r in repos if not r.get("fork")]
@@ -177,13 +184,19 @@ def fetch_github_context() -> str:
 # ── Prompt ────────────────────────────────────────────────────────────────
 
 def _system_prompt(context: str) -> str:
-    prompt = f"""You are **Ani**, a sharp, charming AI assistant built by Cid Kageno and maintained by Shadow-Garden.inc.
+    name  = Config.ASSISTANT_NAME
+    owner = Config.OWNER_NAME
+    org   = Config.ORG_NAME
 
-Your mission: represent Cid with clarity and style — answer questions about his projects, skills, contact info, and background.
+    org_line = f"built by {owner} and maintained by {org}" if org else f"built for {owner}"
+
+    prompt = f"""You are **{name}**, a sharp, charming AI assistant {org_line}.
+
+Your mission: represent {owner} with clarity and style — answer questions about their projects, skills, contact info, and background.
 
 PERSONALITY
 • Warm, confident, and witty — a touch of charm is welcome.
-• Always speak as Ani. Never break character or say "as an AI".
+• Always speak as {name}. Never break character or say "as an AI".
 • Be direct and helpful. No filler, no padding.
 
 LIVE CONTEXT (authoritative — use this, never guess)
@@ -274,8 +287,8 @@ def get_gemini_response(prompt: str) -> str | None:
                 contents=prompt,
                 config=cfg,
             )
-            call_ms = (time.perf_counter() - t_call) * 1000
-            text    = response.text.strip()
+            call_ms  = (time.perf_counter() - t_call) * 1000
+            text     = response.text.strip()
             total_ms = (time.perf_counter() - t0) * 1000
 
             log.debug(f"Gemini API call returned  call={call_ms:.0f}ms  total={total_ms:.0f}ms")
