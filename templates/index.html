@@ -897,7 +897,7 @@
         showTyping();
 
         try {
-            const res = await fetch('/chat', {
+            const res = await fetch('/chat/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: text })
@@ -905,9 +905,73 @@
 
             if (!res.ok) throw new Error('Server error');
 
-            const data = await res.json();
-            hideTyping();
-            addMessage(data.response || 'No response returned.', 'bot', data.source);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let bubble = null;
+            let rawText = '';
+            let source = 'AI Response';
+            let started = false;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    let event;
+                    try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                    if (event.token !== undefined && !event.done) {
+                        if (!started) {
+                            hideTyping();
+                            started = true;
+                            suggestions.style.display = 'none';
+
+                            const row = document.createElement('div');
+                            row.className = 'msg-row bot';
+                            const av = document.createElement('div');
+                            av.className = 'msg-avatar';
+                            av.textContent = '✦';
+                            av.setAttribute('aria-hidden', 'true');
+                            const stack = document.createElement('div');
+                            stack.className = 'msg-stack';
+                            bubble = document.createElement('div');
+                            bubble.className = 'msg-bubble';
+                            stack.appendChild(bubble);
+                            row.appendChild(av);
+                            row.appendChild(stack);
+                            chatBox.appendChild(row);
+                        }
+                        rawText += event.token;
+                        bubble.innerHTML = parseMarkdown(rawText);
+                        scrollToBottom();
+                    }
+
+                    if (event.done) {
+                        source = event.source || 'AI Response';
+                        if (!started) {
+                            hideTyping();
+                            addMessage(rawText || "No response returned.", 'bot', source);
+                        } else if (bubble) {
+                            const meta = document.createElement('div');
+                            meta.className = 'msg-meta';
+                            meta.textContent = getTime();
+                            if (source === 'Database') {
+                                const badge = document.createElement('span');
+                                badge.className = 'source-badge';
+                                badge.textContent = 'cached';
+                                meta.appendChild(badge);
+                            }
+                            bubble.parentElement.appendChild(meta);
+                        }
+                    }
+                }
+            }
         } catch {
             hideTyping();
             addMessage("I'm having trouble connecting right now. Please try again in a moment.", 'bot');

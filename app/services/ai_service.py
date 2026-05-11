@@ -150,6 +150,29 @@ RESPONSE RULES
 """
 
 
+def get_gemini_response_stream(prompt: str):
+    keys = Config.GOOGLE_API_KEYS
+    if not keys or _client is None:
+        return None
+
+    context    = fetch_github_context()
+    sys_prompt = _system_prompt(context)
+
+    try:
+        return _client.models.generate_content_stream(
+            model=Config.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=sys_prompt,
+                temperature=Config.GEMINI_TEMP,
+                max_output_tokens=Config.GEMINI_MAX_TOKENS,
+            ),
+        )
+    except Exception as e:
+        log.error(f"Gemini stream error: {e}")
+        return None
+
+
 def get_gemini_response(prompt: str) -> str | None:
     keys = Config.GOOGLE_API_KEYS
     if not keys:

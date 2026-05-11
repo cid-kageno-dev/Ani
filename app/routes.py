@@ -1,7 +1,8 @@
+import json
 import time
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify, render_template, Response, stream_with_context
 from flask_cors import cross_origin
-from app.services.ai_service import get_gemini_response
+from app.services.ai_service import get_gemini_response, get_gemini_response_stream
 from app.services.db_service import (
     save_interaction,
     get_fallback_answer,
@@ -34,6 +35,52 @@ def _log_message(user_input: str, response: str, source: str, ms: float):
 def home():
     log.info("Serving chat UI")
     return render_template("index.html")
+
+
+@main.route("/chat/stream", methods=["POST"])
+@cross_origin()
+def chat_stream():
+    data       = request.get_json(silent=True) or {}
+    user_input = data.get("message", "").strip()
+
+    if not user_input:
+        return jsonify({"error": "Message is required"}), 400
+
+    log.info(f"Stream request: '{user_input[:80]}{'...' if len(user_input) > 80 else ''}'")
+    t0 = time.perf_counter()
+
+    stream = get_gemini_response_stream(user_input)
+
+    if stream is None:
+        log.warning("Gemini stream unavailable — falling back to DB")
+        fallback = get_fallback_answer(user_input)
+        _bg(save_interaction, user_input, fallback, "Database")
+        def fallback_gen():
+            yield f"data: {json.dumps({'token': fallback, 'done': False})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'source': 'Database'})}\n\n"
+        return Response(stream_with_context(fallback_gen()), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    full_text = []
+
+    def generate():
+        try:
+            for chunk in stream:
+                token = chunk.text or ""
+                if token:
+                    full_text.append(token)
+                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+            collected = "".join(full_text)
+            ms = (time.perf_counter() - t0) * 1000
+            log.info(f"Stream complete in {ms:.0f}ms — {len(collected)} chars")
+            _bg(save_interaction, user_input, collected, "AI Response")
+            yield f"data: {json.dumps({'done': True, 'source': 'AI Response'})}\n\n"
+        except Exception as e:
+            log.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'done': True, 'error': True, 'source': 'Database'})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @main.route("/chat", methods=["POST"])
