@@ -14,15 +14,16 @@ log    = get_logger("ani.ai")
 log_gh = get_logger("ani.github")
 
 # ── Key rotation state ────────────────────────────────────────────────────
-_key_lock:  threading.Lock            = threading.Lock()
-_key_index: int                       = 0
-_client:    genai.Client | None       = None
+_key_lock:  threading.Lock      = threading.Lock()
+_key_index: int                 = 0
+_client:    genai.Client | None = None
 
 # ── GitHub context cache ──────────────────────────────────────────────────
-_gh_lock:   threading.Lock = threading.Lock()
-_gh_cache:  dict           = {"data": None, "fetched_at": 0.0}
+_gh_lock:  threading.Lock = threading.Lock()
+_gh_cache: dict           = {"data": None, "fetched_at": 0.0}
 
 # ── Static contact info ───────────────────────────────────────────────────
+
 def _static_contact() -> dict:
     return {
         "email":    "cidkageno105@gmail.com",
@@ -44,6 +45,7 @@ def _configure(index: int = 0) -> bool:
         _key_index = index % len(keys)
         _client    = genai.Client(api_key=keys[_key_index])
     log.info(f"Gemini configured with key #{_key_index + 1} of {len(keys)}")
+    log.debug(f"  model={Config.GEMINI_MODEL}  temp={Config.GEMINI_TEMP}  max_tokens={Config.GEMINI_MAX_TOKENS}")
     return True
 
 
@@ -66,12 +68,16 @@ _configure(0)
 # ── GitHub context ────────────────────────────────────────────────────────
 
 def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
+    log_gh.debug(f"  → GET {url}")
+    t0 = time.perf_counter()
     try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        log_gh.debug(f"GET {url} → {r.status_code} ({r.elapsed.total_seconds()*1000:.0f}ms)")
+        r  = requests.get(url, headers=headers, timeout=timeout)
+        ms = (time.perf_counter() - t0) * 1000
+        log_gh.debug(f"  ← {r.status_code} {url.split('/')[-1]}  {ms:.0f}ms  size={len(r.content)}B")
         return r if r.status_code == 200 else None
     except Exception as e:
-        log_gh.warning(f"GET {url} failed: {e}")
+        ms = (time.perf_counter() - t0) * 1000
+        log_gh.warning(f"  ✗ GET {url} failed after {ms:.0f}ms: {e}")
         return None
 
 
@@ -83,21 +89,34 @@ def fetch_github_context() -> str:
         cached_data = _gh_cache["data"]
         cached_at   = _gh_cache["fetched_at"]
 
-    if cached_data and (now - cached_at < ttl):
-        log_gh.debug(f"GitHub cache hit (age={int(now - cached_at)}s / ttl={ttl}s)")
+    age = int(now - cached_at)
+    if cached_data and age < ttl:
+        remaining = ttl - age
+        log_gh.debug(f"Cache hit  age={age}s  ttl={ttl}s  expires_in={remaining}s  size={len(cached_data)}B")
         return cached_data
+
+    if cached_data:
+        log_gh.debug(f"Cache expired  age={age}s  ttl={ttl}s — fetching fresh data")
+    else:
+        log_gh.debug("Cache empty — first fetch")
 
     username   = Config.GITHUB_USERNAME
     gh_headers = {"Accept": "application/vnd.github+json"}
     base       = "https://api.github.com"
 
-    log_gh.info(f"Fetching live GitHub data for '{username}'")
+    urls = {
+        "profile": f"{base}/users/{username}",
+        "repos":   f"{base}/users/{username}/repos?sort=updated&per_page=10",
+        "readme":  f"https://raw.githubusercontent.com/{username}/{username}/main/README.md",
+    }
+    log_gh.info(f"Fetching GitHub data for '{username}'  ({len(urls)} concurrent requests)")
+    log_gh.debug(f"  URLs: {list(urls.values())}")
     t0 = time.perf_counter()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-        f_profile = ex.submit(_safe_get, f"{base}/users/{username}", gh_headers)
-        f_repos   = ex.submit(_safe_get, f"{base}/users/{username}/repos?sort=updated&per_page=10", gh_headers)
-        f_readme  = ex.submit(_safe_get, f"https://raw.githubusercontent.com/{username}/{username}/main/README.md")
+        f_profile = ex.submit(_safe_get, urls["profile"], gh_headers)
+        f_repos   = ex.submit(_safe_get, urls["repos"],   gh_headers)
+        f_readme  = ex.submit(_safe_get, urls["readme"])
 
     p_resp  = f_profile.result()
     r_resp  = f_repos.result()
@@ -109,10 +128,10 @@ def fetch_github_context() -> str:
 
     ms = (time.perf_counter() - t0) * 1000
     log_gh.info(
-        f"GitHub fetch done in {ms:.0f}ms — "
-        f"profile={'ok' if profile else 'miss'}, "
-        f"repos={len(repos) if isinstance(repos, list) else 'miss'}, "
-        f"readme={'ok' if rd_resp else 'miss'}"
+        f"GitHub fetch done  {ms:.0f}ms — "
+        f"profile={'ok' if profile else 'miss'}  "
+        f"repos={len(repos) if isinstance(repos, list) else 'miss'}  "
+        f"readme={'ok (' + str(len(readme)) + 'B)' if rd_resp else 'miss'}"
     )
 
     contact = _static_contact()
@@ -134,19 +153,23 @@ def fetch_github_context() -> str:
 
     if isinstance(repos, list):
         owned = [r for r in repos if not r.get("fork")]
-        log_gh.info(f"Found {len(owned)} non-fork repos")
+        log_gh.info(f"Repos: {len(repos)} total  {len(owned)} owned (non-fork)  {len(repos) - len(owned)} forked")
         for r in owned:
             desc  = f" — {r['description']}" if r.get("description") else ""
             lang  = f" [{r['language']}]"    if r.get("language")    else ""
             stars = f" ★{r['stargazers_count']}" if r.get("stargazers_count") else ""
             lines.append(f"• {r['name']}{lang}{stars}: {r['html_url']}{desc}")
+            log_gh.debug(f"  repo: {r['name']}{lang}{stars}")
     else:
         log_gh.warning("Repos response was not a list — skipping")
 
     context = "\n".join(lines)
+    log_gh.debug(f"Context built  size={len(context)}B  lines={len(lines)}")
+
     with _gh_lock:
         _gh_cache["data"]       = context
         _gh_cache["fetched_at"] = now
+    log_gh.debug("Context cached")
 
     return context
 
@@ -154,7 +177,7 @@ def fetch_github_context() -> str:
 # ── Prompt ────────────────────────────────────────────────────────────────
 
 def _system_prompt(context: str) -> str:
-    return f"""You are **Ani**, a sharp, charming AI assistant built by Cid Kageno and maintained by Shadow-Garden.inc.
+    prompt = f"""You are **Ani**, a sharp, charming AI assistant built by Cid Kageno and maintained by Shadow-Garden.inc.
 
 Your mission: represent Cid with clarity and style — answer questions about his projects, skills, contact info, and background.
 
@@ -174,6 +197,8 @@ RESPONSE RULES
 5. If you don't know something, say so cleanly and offer what you *do* know.
 6. Never fabricate data. If context is unavailable, say so honestly.
 """
+    log.debug(f"System prompt built  size={len(prompt)}B")
+    return prompt
 
 
 def _make_config() -> types.GenerateContentConfig:
@@ -186,38 +211,48 @@ def _make_config() -> types.GenerateContentConfig:
 # ── Public API ────────────────────────────────────────────────────────────
 
 def get_gemini_response_stream(prompt: str) -> Generator | None:
+    log.debug(f"get_gemini_response_stream()  prompt_len={len(prompt)}")
+
     if not Config.GOOGLE_API_KEYS or _client is None:
-        log.warning("Gemini stream skipped — no client configured")
+        log.warning("Stream skipped — no Gemini client configured")
         return None
 
+    log.debug("Fetching GitHub context for stream…")
     context    = fetch_github_context()
     sys_prompt = _system_prompt(context)
 
     with _key_lock:
         client = _client
+        ki     = _key_index
 
+    log.debug(f"Calling Gemini stream  model={Config.GEMINI_MODEL}  key=#{ki + 1}")
     try:
         cfg = _make_config()
         cfg.system_instruction = sys_prompt
-        return client.models.generate_content_stream(
+        stream = client.models.generate_content_stream(
             model=Config.GEMINI_MODEL,
             contents=prompt,
             config=cfg,
         )
+        log.debug("Gemini stream opened — returning iterator to caller")
+        return stream
     except Exception as e:
-        log.error(f"Gemini stream error: {e}")
+        log.error(f"Gemini stream open failed: {e}")
         return None
 
 
 def get_gemini_response(prompt: str) -> str | None:
     keys = Config.GOOGLE_API_KEYS
+    log.debug(f"get_gemini_response()  prompt_len={len(prompt)}  keys_available={len(keys)}")
+
     if not keys:
         log.error("Cannot call Gemini — no API keys configured")
         return None
 
-    log.info(f"Request: '{prompt[:80]}{'...' if len(prompt) > 80 else ''}'")
+    log.info(f"Prompt: '{prompt[:80]}{'…' if len(prompt) > 80 else ''}'")
     t0 = time.perf_counter()
 
+    log.debug("Fetching GitHub context for non-stream…")
     context      = fetch_github_context()
     sys_prompt   = _system_prompt(context)
     max_attempts = len(keys)
@@ -227,24 +262,31 @@ def get_gemini_response(prompt: str) -> str | None:
             client = _client
             ki     = _key_index
 
+        log.debug(f"Attempt {attempt + 1}/{max_attempts}  key=#{ki + 1}  model={Config.GEMINI_MODEL}")
         try:
-            log.debug(f"Attempt {attempt + 1}/{max_attempts} via key #{ki + 1}")
             cfg = _make_config()
             cfg.system_instruction = sys_prompt
+
+            log.debug("Sending request to Gemini API…")
+            t_call = time.perf_counter()
             response = client.models.generate_content(
                 model=Config.GEMINI_MODEL,
                 contents=prompt,
                 config=cfg,
             )
-            text = response.text.strip()
-            ms   = (time.perf_counter() - t0) * 1000
-            log.info(f"Gemini responded in {ms:.0f}ms — {len(text)} chars via key #{ki + 1}")
+            call_ms = (time.perf_counter() - t_call) * 1000
+            text    = response.text.strip()
+            total_ms = (time.perf_counter() - t0) * 1000
+
+            log.debug(f"Gemini API call returned  call={call_ms:.0f}ms  total={total_ms:.0f}ms")
+            log.info(f"Response  chars={len(text)}  words≈{len(text.split())}  via key #{ki + 1}  {total_ms:.0f}ms")
             return text
 
         except Exception as e:
             ms = (time.perf_counter() - t0) * 1000
-            log.error(f"Key #{ki + 1} error after {ms:.0f}ms: {e}")
+            log.error(f"Key #{ki + 1} failed after {ms:.0f}ms: {e}")
             if attempt < max_attempts - 1:
+                log.debug(f"Rotating key before attempt {attempt + 2}…")
                 _rotate()
             else:
                 log.critical("All API keys exhausted — falling back to DB")

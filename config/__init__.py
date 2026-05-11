@@ -1,15 +1,13 @@
 import os
 from app.logger import get_logger, setup_logging
 
-setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+setup_logging(os.getenv("LOG_LEVEL", "DEBUG"))
 
 _log = get_logger("ani.config")
 
 
 class Config:
     # ── Gemini ────────────────────────────────────────────────────────────
-    # Supports numbered keys GOOGLE_API_KEY1, GOOGLE_API_KEY2, … for rotation.
-    # Falls back to the bare GOOGLE_API_KEY if no numbered keys are found.
     GOOGLE_API_KEYS: list[str] = [
         v
         for v in (os.getenv(f"GOOGLE_API_KEY{i}") for i in range(1, 20))
@@ -45,11 +43,33 @@ class Config:
     GITHUB_CACHE_TTL: int = int(os.getenv("GITHUB_CACHE_TTL", "300"))
 
     # ── App ───────────────────────────────────────────────────────────────
-    DEBUG: bool              = os.getenv("FLASK_DEBUG", "true").lower() == "true"
-    MAX_MESSAGE_LENGTH: int  = int(os.getenv("MAX_MESSAGE_LENGTH", "1200"))
+    DEBUG: bool             = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+    MAX_MESSAGE_LENGTH: int = int(os.getenv("MAX_MESSAGE_LENGTH", "1200"))
 
 
-# ── Startup validation & logging ──────────────────────────────────────────
+# ── Startup validation & verbose logging ──────────────────────────────────
+_log.debug("━━━━━━━━━━ CONFIG DUMP ━━━━━━━━━━")
+_log.debug(f"  LOG_LEVEL            = {os.getenv('LOG_LEVEL', 'DEBUG')}")
+_log.debug(f"  GEMINI_MODEL         = {Config.GEMINI_MODEL}")
+_log.debug(f"  GEMINI_TEMP          = {Config.GEMINI_TEMP}")
+_log.debug(f"  GEMINI_MAX_TOKENS    = {Config.GEMINI_MAX_TOKENS}")
+_log.debug(f"  DATABASE_BACKEND     = {Config.DATABASE_BACKEND}")
+_log.debug(f"  DATABASE_URL         = {'set (' + Config.DATABASE_URL.split('@')[-1].split('?')[0] + ')' if Config.DATABASE_URL else 'not set'}")
+_log.debug(f"  RENDER_DATABASE_URL  = {'set (' + Config.RENDER_DATABASE_URL.split('@')[-1].split('?')[0] + ')' if Config.RENDER_DATABASE_URL else 'not set'}")
+_log.debug(f"  FIREBASE_PROJECT_ID  = {Config.FIREBASE_PROJECT_ID or 'not set'}")
+_log.debug(f"  FIREBASE_COLLECTION  = {Config.FIREBASE_COLLECTION}")
+_log.debug(f"  GITHUB_USERNAME      = {Config.GITHUB_USERNAME}")
+_log.debug(f"  GITHUB_CACHE_TTL     = {Config.GITHUB_CACHE_TTL}s")
+_log.debug(f"  MAX_MESSAGE_LENGTH   = {Config.MAX_MESSAGE_LENGTH}")
+_log.debug(f"  DEBUG                = {Config.DEBUG}")
+_log.debug("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+_firebase_set = (
+    Config.FIREBASE_CREDENTIALS
+    or Config.FIREBASE_SERVICE_ACCOUNT_JSON
+    or Config.FIREBASE_PROJECT_ID
+)
+
 if Config.GOOGLE_API_KEYS:
     _log.info(f"Loaded {len(Config.GOOGLE_API_KEYS)} Gemini API key(s)")
 else:
@@ -57,11 +77,6 @@ else:
 
 _log.info(f"Database backend: {Config.DATABASE_BACKEND}")
 
-_firebase_set = (
-    Config.FIREBASE_CREDENTIALS
-    or Config.FIREBASE_SERVICE_ACCOUNT_JSON
-    or Config.FIREBASE_PROJECT_ID
-)
 if _firebase_set:
     _log.info(f"Firebase configured — collection '{Config.FIREBASE_COLLECTION}'")
 else:

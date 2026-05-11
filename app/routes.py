@@ -3,7 +3,7 @@ import threading
 import time
 from datetime import datetime
 
-from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, render_template, request, stream_with_context
 from flask_cors import cross_origin
 
 from app.logger import get_logger, divider
@@ -20,19 +20,48 @@ log      = get_logger("ani.routes")
 log_chat = get_logger("ani.chat")
 main     = Blueprint("main", __name__)
 
+
+# ── Request / response lifecycle hooks ────────────────────────────────────
+
+@main.before_request
+def _before():
+    g.t0 = time.perf_counter()
+    log.debug(
+        f"▶ {request.method} {request.path}"
+        + (f"  body={request.content_length}B" if request.content_length else "")
+        + f"  ip={request.remote_addr}"
+        + (f"  ua={request.user_agent.string[:60]}" if request.user_agent.string else "")
+    )
+
+
+@main.after_request
+def _after(response):
+    ms = (time.perf_counter() - g.t0) * 1000 if hasattr(g, "t0") else 0
+    log.debug(
+        f"◀ {request.method} {request.path}"
+        f"  status={response.status_code}"
+        f"  {ms:.1f}ms"
+        + (f"  size={response.content_length}B" if response.content_length else "")
+    )
+    return response
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _bg(fn, *args) -> None:
-    threading.Thread(target=fn, args=args, daemon=True).start()
+    name = fn.__name__
+    log.debug(f"[bg] Spawning background thread → {name}({', '.join(str(a)[:30] for a in args[:2])}…)")
+    threading.Thread(target=fn, args=args, daemon=True, name=f"bg-{name}").start()
 
 
 def _err(message: str, status: int = 400) -> tuple:
+    log.debug(f"Error response {status}: {message}")
     return jsonify({"error": message, "status": status}), status
 
 
 def _validate_message(data: dict) -> tuple[str, str | None]:
-    """Return (message, error_string). error_string is None on success."""
     raw = data.get("message", "")
+    log.debug(f"Validating message  type={type(raw).__name__}  raw_len={len(str(raw))}")
     if not isinstance(raw, str):
         return "", "Message must be a string"
     text = raw.strip()
@@ -40,6 +69,7 @@ def _validate_message(data: dict) -> tuple[str, str | None]:
         return "", "Message is required"
     if len(text) > Config.MAX_MESSAGE_LENGTH:
         return "", f"Message exceeds maximum length of {Config.MAX_MESSAGE_LENGTH} characters"
+    log.debug(f"Message valid  len={len(text)}")
     return text, None
 
 
@@ -47,7 +77,7 @@ def _log_exchange(user_input: str, response: str, source: str, ms: float) -> Non
     divider()
     log_chat.info(f"USER  ▶  {user_input[:120]}")
     divider("·")
-    log_chat.info(f"ANI   ◀  [{source}] ({ms:.0f}ms)")
+    log_chat.info(f"ANI   ◀  [{source}] ({ms:.0f}ms)  chars={len(response)}")
     for line in response.splitlines():
         print(f"          {line}", flush=True)
     divider()
@@ -67,32 +97,38 @@ def _dt_iso(value) -> str | None:
 
 @main.route("/")
 def home():
-    log.info("Serving chat UI")
+    log.debug("Rendering index.html template")
     return render_template("index.html")
 
 
 @main.route("/chat/stream", methods=["POST"])
 @cross_origin()
 def chat_stream():
-    data       = request.get_json(silent=True) or {}
+    log.debug("── /chat/stream: parsing request body")
+    data            = request.get_json(silent=True) or {}
     user_input, err = _validate_message(data)
 
     if err:
         return _err(err)
 
-    log.info(f"Stream: '{user_input[:80]}{'…' if len(user_input) > 80 else ''}'")
+    log.info(f"── /chat/stream  msg='{user_input[:80]}{'…' if len(user_input) > 80 else ''}'")
     t0 = time.perf_counter()
 
+    log.debug("── /chat/stream: requesting Gemini stream")
     stream = get_gemini_response_stream(user_input)
 
     if stream is None:
-        log.warning("Gemini stream unavailable — using DB fallback")
+        log.warning("── /chat/stream: Gemini unavailable — falling back to DB")
+        log.debug("── /chat/stream: calling get_fallback_answer()")
         fallback = get_fallback_answer(user_input)
+        log.debug(f"── /chat/stream: fallback len={len(fallback)}")
         _bg(save_interaction, user_input, fallback, "Database")
 
         def _fallback_gen():
+            log.debug("── /chat/stream [fallback_gen]: yielding single token + done")
             yield f"data: {json.dumps({'token': fallback, 'done': False})}\n\n"
             yield f"data: {json.dumps({'done': True, 'source': 'Database'})}\n\n"
+            log.debug("── /chat/stream [fallback_gen]: stream closed")
 
         return Response(
             stream_with_context(_fallback_gen()),
@@ -100,7 +136,9 @@ def chat_stream():
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    full_text: list[str] = []
+    log.debug("── /chat/stream: Gemini stream acquired — beginning token iteration")
+    full_text:   list[str] = []
+    chunk_count: list[int] = [0]
 
     def _generate():
         try:
@@ -108,16 +146,18 @@ def chat_stream():
                 token = chunk.text or ""
                 if token:
                     full_text.append(token)
+                    chunk_count[0] += 1
+                    log.debug(f"── chunk #{chunk_count[0]}  +{len(token)}chars  total={sum(len(t) for t in full_text)}")
                     yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
 
             collected = "".join(full_text)
             ms        = (time.perf_counter() - t0) * 1000
-            log.info(f"Stream complete in {ms:.0f}ms — {len(collected)} chars")
+            log.info(f"── /chat/stream: complete  chunks={chunk_count[0]}  chars={len(collected)}  {ms:.0f}ms")
             _bg(save_interaction, user_input, collected, "AI Response")
             yield f"data: {json.dumps({'done': True, 'source': 'AI Response'})}\n\n"
 
         except Exception as e:
-            log.error(f"Stream error: {e}")
+            log.error(f"── /chat/stream: generator error — {e}")
             yield f"data: {json.dumps({'done': True, 'error': True, 'source': 'Error'})}\n\n"
 
     return Response(
@@ -130,24 +170,30 @@ def chat_stream():
 @main.route("/chat", methods=["POST"])
 @cross_origin()
 def chat():
-    t0         = time.perf_counter()
-    data       = request.get_json(silent=True) or {}
+    log.debug("── /chat: parsing request body")
+    t0              = time.perf_counter()
+    data            = request.get_json(silent=True) or {}
     user_input, err = _validate_message(data)
 
     if err:
-        log.warning(f"Bad request: {err}")
+        log.warning(f"── /chat: rejected — {err}")
         return _err(err)
 
+    log.info(f"── /chat  msg='{user_input[:80]}{'…' if len(user_input) > 80 else ''}'")
+    log.debug("── /chat: calling get_gemini_response()")
     ai_response = get_gemini_response(user_input)
     ms          = (time.perf_counter() - t0) * 1000
 
     if ai_response:
+        log.debug(f"── /chat: AI response received  chars={len(ai_response)}  {ms:.0f}ms")
         _bg(save_interaction, user_input, ai_response, "AI Response")
         _log_exchange(user_input, ai_response, "AI Response", ms)
         return jsonify({"response": ai_response, "source": "AI Response"})
 
-    log.warning(f"Gemini unavailable after {ms:.0f}ms — using DB fallback")
+    log.warning(f"── /chat: Gemini failed after {ms:.0f}ms — requesting fallback")
+    log.debug("── /chat: calling get_fallback_answer()")
     fallback = get_fallback_answer(user_input)
+    log.debug(f"── /chat: fallback len={len(fallback)}")
     _bg(save_interaction, user_input, fallback, "Database")
     ms2 = (time.perf_counter() - t0) * 1000
     _log_exchange(user_input, fallback, "Database", ms2)
@@ -159,9 +205,12 @@ def chat():
 def history():
     requested = request.args.get("limit", 20, type=int)
     limit     = max(1, min(requested, 100))
-    log.info(f"GET /history  limit={limit}")
+    log.debug(f"── /history: requested={requested}  clamped={limit}")
 
+    log.debug("── /history: calling get_recent_interactions()")
     rows = get_recent_interactions(limit=limit)
+    log.debug(f"── /history: serialising {len(rows)} rows")
+
     return jsonify([
         {
             "id":          row.get("id"),
@@ -177,10 +226,10 @@ def history():
 @main.route("/stats", methods=["GET"])
 @cross_origin()
 def stats():
-    log.info("GET /stats")
+    log.debug("── /stats: calling get_stats()")
     data = get_stats()
     log.info(
-        f"Stats → total={data.get('total', 0)} | "
+        f"── /stats: total={data.get('total', 0)} | "
         f"ai={data.get('ai_responses', 0)} | "
         f"fallback={data.get('fallback_responses', 0)}"
     )
@@ -189,6 +238,7 @@ def stats():
 
 @main.route("/health", methods=["GET"])
 def health():
+    log.debug("── /health: ok")
     return jsonify({"status": "ok", "service": "ani"}), 200
 
 
