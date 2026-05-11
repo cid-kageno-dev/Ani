@@ -2,14 +2,14 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from app.logger import get_logger, divider, log_box, log_status
-from app.services.db_service import ensure_schema
+from app.services.db_service import ensure_schema, ensure_render_schema
 
 log = get_logger("ani.boot")
 
 
 def _check_connections():
     from config import Config
-    from app.services.db_service import _backend, _get_pool, _get_firestore, _firebase_configured
+    from app.services.db_service import _backend, _get_pool, _get_render_pool, _get_firestore, _firebase_configured
 
     results = {}
 
@@ -26,7 +26,7 @@ def _check_connections():
     else:
         results["firebase"] = (False, "not configured")
 
-    # PostgreSQL
+    # PostgreSQL (primary)
     if Config.DATABASE_URL:
         try:
             _get_pool()
@@ -35,6 +35,16 @@ def _check_connections():
             results["postgres"] = (False, str(e)[:50])
     else:
         results["postgres"] = (False, "DATABASE_URL not set")
+
+    # Render PostgreSQL (mirror)
+    if Config.RENDER_DATABASE_URL:
+        try:
+            _get_render_pool()
+            results["render"] = (True, Config.RENDER_DATABASE_URL.split("@")[-1].split("?")[0])
+        except Exception as e:
+            results["render"] = (False, str(e)[:50])
+    else:
+        results["render"] = (False, "RENDER_DATABASE_URL not set")
 
     # Active DB backend
     results["backend"] = _backend() or "none"
@@ -54,16 +64,18 @@ def create_app() -> Flask:
         "  Booting up...",
     ])
 
-    schema_ok = ensure_schema()
-    conns     = _check_connections()
+    schema_ok        = ensure_schema()
+    render_schema_ok = ensure_render_schema()
+    conns            = _check_connections()
 
     divider()
     print("  CONNECTION STATUS", flush=True)
     divider()
-    log_status("Gemini AI",   conns["gemini"][0],   conns["gemini"][1])
-    log_status("Firebase",    conns["firebase"][0],  conns["firebase"][1])
-    log_status("PostgreSQL",  conns["postgres"][0],  conns["postgres"][1])
-    log_status("DB Schema",   schema_ok,             f"active backend: {conns['backend']}")
+    log_status("Gemini AI",        conns["gemini"][0],   conns["gemini"][1])
+    log_status("Firebase",         conns["firebase"][0],  conns["firebase"][1])
+    log_status("PostgreSQL",       conns["postgres"][0],  conns["postgres"][1])
+    log_status("Render PostgreSQL", conns["render"][0],   conns["render"][1])
+    log_status("DB Schema",        schema_ok,             f"active backend: {conns['backend']}")
     divider()
 
     from app.routes import main

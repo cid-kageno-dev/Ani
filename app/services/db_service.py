@@ -14,6 +14,7 @@ from app.logger import get_logger
 log = get_logger("ani.db")
 
 _pool: pool.ThreadedConnectionPool | None = None
+_render_pool: pool.ThreadedConnectionPool | None = None
 _firestore_client = None
 _firebase_ready = False
 _firebase_admin = None
@@ -138,6 +139,17 @@ def _get_pool() -> pool.ThreadedConnectionPool:
     return _pool
 
 
+def _get_render_pool() -> pool.ThreadedConnectionPool:
+    global _render_pool
+    if _render_pool is None:
+        if not Config.RENDER_DATABASE_URL:
+            raise RuntimeError("RENDER_DATABASE_URL is not configured")
+        log.info("Initializing Render DB connection pool (min=1, max=5)")
+        _render_pool = pool.ThreadedConnectionPool(1, 5, Config.RENDER_DATABASE_URL)
+        log.info("Render DB connection pool ready")
+    return _render_pool
+
+
 def _conn():
     return _get_pool().getconn()
 
@@ -145,6 +157,48 @@ def _conn():
 def _put(conn):
     if conn and _pool is not None:
         _pool.putconn(conn)
+
+
+def _render_conn():
+    return _get_render_pool().getconn()
+
+
+def _render_put(conn):
+    if conn and _render_pool is not None:
+        _render_pool.putconn(conn)
+
+
+_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS chat_interactions (
+        id         SERIAL PRIMARY KEY,
+        user_query TEXT        NOT NULL,
+        ai_response TEXT       NOT NULL,
+        source     VARCHAR(50) DEFAULT 'AI Response',
+        created_at TIMESTAMP   DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_created
+        ON chat_interactions(created_at DESC);
+"""
+
+
+def _init_postgres_schema(get_conn, put_conn, label: str) -> bool:
+    log.info(f"Verifying database schema ({label})...")
+    conn = None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(_SCHEMA_SQL)
+        conn.commit()
+        cur.close()
+        log.info(f"Schema OK — table 'chat_interactions' ready ({label})")
+        return True
+    except Exception as e:
+        log.error(f"Schema init failed ({label}): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        put_conn(conn)
 
 
 def ensure_schema() -> bool:
@@ -162,33 +216,36 @@ def ensure_schema() -> bool:
         log.warning("Skipping schema verification — no database backend is configured")
         return False
 
-    log.info("Verifying database schema...")
+    return _init_postgres_schema(_conn, _put, "primary")
+
+
+def ensure_render_schema() -> bool:
+    if not Config.RENDER_DATABASE_URL:
+        return False
+    return _init_postgres_schema(_render_conn, _render_put, "render")
+
+
+def _save_interaction_render(user_query: str, ai_response: str, source: str):
+    t0 = time.perf_counter()
     conn = None
     try:
-        conn = _conn()
+        conn = _render_conn()
         cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS chat_interactions (
-                id         SERIAL PRIMARY KEY,
-                user_query TEXT        NOT NULL,
-                ai_response TEXT       NOT NULL,
-                source     VARCHAR(50) DEFAULT 'AI Response',
-                created_at TIMESTAMP   DEFAULT NOW()
-            );
-            CREATE INDEX IF NOT EXISTS idx_chat_created
-                ON chat_interactions(created_at DESC);
-        """)
+        cur.execute(
+            "INSERT INTO chat_interactions (user_query, ai_response, source) VALUES (%s, %s, %s) RETURNING id",
+            (user_query, ai_response, source),
+        )
+        row_id = cur.fetchone()[0]
         conn.commit()
         cur.close()
-        log.info("Schema OK — table 'chat_interactions' is ready")
-        return True
+        ms = (time.perf_counter() - t0) * 1000
+        log.info(f"Mirrored interaction #{row_id} [{source}] to Render in {ms:.1f}ms")
     except Exception as e:
-        log.error(f"Schema init failed: {e}")
+        log.error(f"Failed to mirror interaction to Render: {e}")
         if conn:
             conn.rollback()
-        return False
     finally:
-        _put(conn)
+        _render_put(conn)
 
 
 def _save_interaction_firebase(user_query: str, ai_response: str, source: str):
@@ -233,13 +290,16 @@ def save_interaction(user_query: str, ai_response: str, source: str = "AI Respon
             _save_interaction_firebase(user_query, ai_response, source)
         except Exception as e:
             log.error(f"Failed to save interaction to Firebase: {e}")
-        return
-
-    if backend == "postgres":
+    elif backend == "postgres":
         _save_interaction_postgres(user_query, ai_response, source)
-        return
+    else:
+        log.debug("Skipping interaction save — no database backend is configured")
 
-    log.debug("Skipping interaction save — no database backend is configured")
+    if Config.RENDER_DATABASE_URL:
+        try:
+            _save_interaction_render(user_query, ai_response, source)
+        except Exception as e:
+            log.error(f"Render mirror save failed: {e}")
 
 
 def _get_firebase_rows(limit: int = 500) -> list:

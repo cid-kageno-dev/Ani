@@ -23,6 +23,7 @@ class Config:
 
     DATABASE_BACKEND: str = os.getenv("DATABASE_BACKEND", "auto")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    RENDER_DATABASE_URL: str = os.getenv("RENDER_DATABASE_URL", "")
 
     _fb_creds_env = os.getenv("FIREBASE_CREDENTIALS", "")
     _fb_key_file  = "firebase-key.json"
