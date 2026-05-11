@@ -1,4 +1,3 @@
-import os
 import time
 import concurrent.futures
 from google import genai
@@ -10,6 +9,7 @@ from app.logger import get_logger
 log = get_logger("ani.ai")
 log_gh = get_logger("ani.github")
 
+_key_index = 0
 _client: genai.Client | None = None
 _github_cache: dict = {"data": None, "fetched_at": 0}
 
@@ -21,28 +21,29 @@ STATIC_CONTACT = {
 }
 
 
-def _build_client() -> genai.Client | None:
-    # Prefer Replit AI Integrations (no personal key needed)
-    ai_base_url = os.environ.get("AI_INTEGRATIONS_GEMINI_BASE_URL")
-    ai_api_key  = os.environ.get("AI_INTEGRATIONS_GEMINI_API_KEY")
-    if ai_base_url and ai_api_key:
-        log.info("Gemini configured via Replit AI Integrations")
-        return genai.Client(
-            api_key=ai_api_key,
-            http_options={"api_version": "", "base_url": ai_base_url},
-        )
-
-    # Fall back to user-supplied API keys
+def _configure(index: int = 0) -> bool:
+    global _key_index, _client
     keys = Config.GOOGLE_API_KEYS
-    if keys:
-        log.info(f"Gemini configured with {len(keys)} user-supplied key(s)")
-        return genai.Client(api_key=keys[0])
+    if not keys:
+        log.warning("No API keys — Gemini is disabled")
+        return False
+    _key_index = index % len(keys)
+    _client = genai.Client(api_key=keys[_key_index])
+    log.info(f"Gemini configured with key #{_key_index + 1} of {len(keys)}")
+    return True
 
-    log.warning("No Gemini credentials found — AI responses will be unavailable")
-    return None
+
+def _rotate() -> bool:
+    global _key_index, _client
+    keys = Config.GOOGLE_API_KEYS
+    old = _key_index + 1
+    _key_index = (_key_index + 1) % len(keys)
+    _client = genai.Client(api_key=keys[_key_index])
+    log.warning(f"Key #{old} failed — rotating to key #{_key_index + 1}")
+    return True
 
 
-_client = _build_client()
+_configure(0)
 
 
 def _safe_get(url: str, headers: dict | None = None, timeout: int = 5):
@@ -150,32 +151,45 @@ RESPONSE RULES
 
 
 def get_gemini_response(prompt: str) -> str | None:
-    if _client is None:
-        log.error("Cannot call Gemini — no credentials configured")
+    keys = Config.GOOGLE_API_KEYS
+    if not keys:
+        log.error("Cannot call Gemini — no API keys configured")
         return None
 
     log.info(f"Request: '{prompt[:80]}{'...' if len(prompt) > 80 else ''}'")
     t0 = time.perf_counter()
 
-    context    = fetch_github_context()
-    sys_prompt = _system_prompt(context)
+    context      = fetch_github_context()
+    sys_prompt   = _system_prompt(context)
+    max_attempts = len(keys)
 
-    try:
-        response = _client.models.generate_content(
-            model=Config.GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=sys_prompt,
-                temperature=Config.GEMINI_TEMP,
-                max_output_tokens=Config.GEMINI_MAX_TOKENS,
-            ),
-        )
-        text = response.text.strip()
-        ms   = (time.perf_counter() - t0) * 1000
-        log.info(f"Gemini responded in {ms:.0f}ms — {len(text)} chars")
-        return text
+    for attempt in range(max_attempts):
+        try:
+            log.debug(f"Attempt {attempt + 1}/{max_attempts} using key #{_key_index + 1}")
+            response = _client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_prompt,
+                    temperature=Config.GEMINI_TEMP,
+                    max_output_tokens=Config.GEMINI_MAX_TOKENS,
+                ),
+            )
+            text = response.text.strip()
+            ms   = (time.perf_counter() - t0) * 1000
+            log.info(
+                f"Gemini responded in {ms:.0f}ms — "
+                f"{len(text)} chars via key #{_key_index + 1}"
+            )
+            return text
 
-    except Exception as e:
-        ms = (time.perf_counter() - t0) * 1000
-        log.error(f"Gemini error after {ms:.0f}ms: {e}")
-        return None
+        except Exception as e:
+            ms = (time.perf_counter() - t0) * 1000
+            log.error(f"Key #{_key_index + 1} error after {ms:.0f}ms: {e}")
+            if attempt < max_attempts - 1:
+                _rotate()
+            else:
+                log.critical("All API keys exhausted — falling back to DB")
+                return None
+
+    return None

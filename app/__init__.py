@@ -13,18 +13,8 @@ def _check_connections():
 
     results = {}
 
-    # Gemini — check Replit AI integration first, then user-supplied keys
-    import os
-    gemini_ok = bool(
-        os.environ.get("AI_INTEGRATIONS_GEMINI_BASE_URL")
-        or Config.GOOGLE_API_KEYS
-    )
-    gemini_detail = (
-        f"{Config.GEMINI_MODEL} (Replit AI)"
-        if os.environ.get("AI_INTEGRATIONS_GEMINI_BASE_URL")
-        else (f"{Config.GEMINI_MODEL} ({len(Config.GOOGLE_API_KEYS)} key(s))" if Config.GOOGLE_API_KEYS else Config.GEMINI_MODEL)
-    )
-    results["gemini"] = (gemini_ok, gemini_detail)
+    # Gemini
+    results["gemini"] = (bool(Config.GOOGLE_API_KEYS), Config.GEMINI_MODEL)
 
     # Firebase
     if _firebase_configured():
