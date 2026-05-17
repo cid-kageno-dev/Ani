@@ -32,8 +32,8 @@ class Config:
         else ""
     )
     FIREBASE_SERVICE_ACCOUNT_JSON: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
-    FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "")
-    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "")
+    FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app")
+    FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "gen-lang-client-0109922552")
     FIREBASE_COLLECTION: str = os.getenv("FIREBASE_COLLECTION", "chat_interactions")
 
     GITHUB_USERNAME: str = os.getenv("GITHUB_USERNAME", "cid-kageno-dev")
