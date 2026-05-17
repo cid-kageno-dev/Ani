@@ -3,6 +3,7 @@ from flask import Flask
 from flask_cors import CORS
 from app.logger import get_logger, divider, log_box, log_status
 from app.services.db_service import ensure_schema
+from app.services.firebase_validator import validate_firebase_on_startup
 
 log = get_logger("ani.boot")
 
@@ -53,6 +54,9 @@ def create_app() -> Flask:
         "",
         "  Booting up...",
     ])
+
+    # Validate Firebase configuration across environments
+    firebase_validation = validate_firebase_on_startup()
 
     schema_ok = ensure_schema()
     conns     = _check_connections()
