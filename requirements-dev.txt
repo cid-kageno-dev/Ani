@@ -1,0 +1,21 @@
+# Development dependencies
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-flask>=1.3.0
+
+# Code quality
+black>=23.7.0
+flake8>=6.1.0
+mypy>=1.5.0
+
+# Security
+bandit>=1.7.5
+safety>=2.3.5
+
+# Utilities
+ipython>=8.15.0
+
+# Main dependencies (for development)
+-r requirements.txt
