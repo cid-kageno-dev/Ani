@@ -1,0 +1,33 @@
+# Prometheus configuration for Ani monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'ani-monitor'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alert_rules.yml"
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Ani application metrics
+  - job_name: 'ani'
+    static_configs:
+      - targets: ['ani:5000']
+    metrics_path: '/metrics'
+    params:
+      format: ['prometheus']
+    scrape_interval: 15s
+    scrape_timeout: 10s

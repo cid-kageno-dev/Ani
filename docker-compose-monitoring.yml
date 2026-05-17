@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  ani:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - GOOGLE_API_KEY1=${GOOGLE_API_KEY1}
+      - DATABASE_BACKEND=postgresql
+      - DATABASE_URL=postgresql://ani_user:ani_pass@postgres:5432/ani_db
+      - FLASK_DEBUG=false
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/var/log/ani
+    depends_on:
+      - postgres
+      - prometheus
+      - grafana
+    volumes:
+      - ./logs:/var/log/ani
+      - ./logs:/app/logs
+    networks:
+      - monitoring
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=ani_user
+      - POSTGRES_PASSWORD=ani_pass
+      - POSTGRES_DB=ani_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ani_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+  # Optional: Elasticsearch for centralized logging
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - monitoring
+
+  # Optional: Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.14.0
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+
+networks:
+  monitoring:
+    driver: bridge
