@@ -329,25 +329,33 @@ def get_recent_interactions(limit: int = 20) -> list:
 
 
 def _get_firebase_stats() -> dict:
-    stats = _empty_stats()
-    docs = _firebase_collection().stream()
-    for doc in docs:
-        row = _doc_to_interaction(doc)
-        stats["total"] += 1
-        if row["source"] == "AI Response":
-            stats["ai_responses"] += 1
-        elif row["source"] == "Database":
-            stats["fallback_responses"] += 1
+    _, _, firestore = _firebase_modules()
+    col = _firebase_collection()
 
-        created_at = row["created_at"]
-        first_at = stats["first_interaction"]
-        last_at = stats["last_interaction"]
-        created_iso = created_at.isoformat()
-        if first_at is None or created_iso < first_at:
-            stats["first_interaction"] = created_iso
-        if last_at is None or created_iso > last_at:
-            stats["last_interaction"] = created_iso
-    return stats
+    total_res    = col.count().get()
+    ai_res       = col.where("source", "==", "AI Response").count().get()
+    fallback_res = col.where("source", "==", "Database").count().get()
+
+    total    = total_res[0][0].value
+    ai_count = ai_res[0][0].value
+    fb_count = fallback_res[0][0].value
+
+    first_docs = col.order_by("created_at", direction=firestore.Query.ASCENDING).limit(1).stream()
+    last_docs  = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(1).stream()
+
+    first_doc = next(iter(first_docs), None)
+    last_doc  = next(iter(last_docs), None)
+
+    first_at = _normalize_datetime(first_doc.to_dict().get("created_at") if first_doc else None).isoformat() if first_doc else None
+    last_at  = _normalize_datetime(last_doc.to_dict().get("created_at")  if last_doc  else None).isoformat() if last_doc  else None
+
+    return {
+        "total": total,
+        "ai_responses": ai_count,
+        "fallback_responses": fb_count,
+        "first_interaction": first_at,
+        "last_interaction": last_at,
+    }
 
 
 def _get_postgres_stats() -> dict:

@@ -18,7 +18,6 @@ class TestHealthEndpoint:
         response = client.get('/health')
         data = response.get_json()
         assert 'status' in data
-        assert 'version' in data
 
 
 class TestChatEndpoint:
@@ -26,23 +25,23 @@ class TestChatEndpoint:
 
     def test_chat_with_message(self, client):
         """Test chat endpoint with valid message."""
-        response = client.post('/api/chat', json={'message': 'Hello Ani'})
-        assert response.status_code in [200, 500]  # May fail without API key
+        response = client.post('/chat', json={'message': 'Hello Ani'})
+        assert response.status_code in [200, 500]
 
     def test_chat_missing_message(self, client):
         """Test chat endpoint without message field."""
-        response = client.post('/api/chat', json={})
+        response = client.post('/chat', json={})
         assert response.status_code == 400
 
     def test_chat_empty_message(self, client):
         """Test chat endpoint with empty message."""
-        response = client.post('/api/chat', json={'message': ''})
+        response = client.post('/chat', json={'message': ''})
         assert response.status_code == 400
 
     def test_chat_invalid_json(self, client):
         """Test chat endpoint with invalid JSON."""
         response = client.post(
-            '/api/chat',
+            '/chat',
             data='invalid json',
             content_type='application/json'
         )

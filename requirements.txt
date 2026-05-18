@@ -1,12 +1,7 @@
 flask
 flask-cors
-flask-swagger-ui
-flask-restx
 google-genai
 gunicorn
 psycopg2-binary
-python-dotenv
 thefuzz
 firebase-admin
-python-json-logger
-python-dotenv
