@@ -15,7 +15,7 @@ _github_cache: dict = {"data": None, "fetched_at": 0}
 
 STATIC_CONTACT = {
     "email":    "cidkageno105@gmail.com",
-    "website":  "https://cid-kageno.top",
+    "website":  "https://www.mritunjoy.online/",
     "facebook": "https://www.facebook.com/share/17di5vpqBZ/",
     "github":   f"https://github.com/{Config.GITHUB_USERNAME}",
 }
