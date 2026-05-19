@@ -21,11 +21,18 @@ def _bg(fn, *args):
 
 
 def _log_message(user_input: str, response: str, source: str, ms: float):
-    log_chat.info(f"[{source}] ({ms:.0f}ms) Q: {user_input[:60]}{'...' if len(user_input) > 60 else ''}")
+    divider()
+    log_chat.info(f"USER  ▶  {user_input}")
+    divider("·")
+    log_chat.info(f"ANI   ◀  [{source}] ({ms:.0f}ms)")
+    for line in response.splitlines():
+        print(f"          {line}", flush=True)
+    divider()
 
 
 @main.route("/")
 def home():
+    log.info("Serving chat UI")
     return render_template("index.html")
 
 
@@ -61,6 +68,7 @@ def chat():
 def history():
     requested_limit = request.args.get("limit", 20, type=int) or 20
     limit = max(1, min(requested_limit, 100))
+    log.debug(f"GET /api/history  limit={limit}")
     rows = get_recent_interactions(limit=limit)
     return jsonify([
         {
@@ -77,10 +85,17 @@ def history():
 @main.route("/api/stats", methods=["GET"])
 @cross_origin()
 def stats():
+    log.debug("GET /api/stats")
     data = get_stats()
+    log.debug(
+        f"Stats  →  total={data.get('total', 0)} | "
+        f"ai={data.get('ai_responses', 0)} | "
+        f"fallback={data.get('fallback_responses', 0)}"
+    )
     return jsonify(data)
 
 
 @main.route("/api/health", methods=["GET"])
 def health():
+    log.debug("GET /api/health  →  ok")
     return jsonify({"status": "ok"})

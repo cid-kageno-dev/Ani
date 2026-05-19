@@ -79,8 +79,8 @@ def get_logger(name: str) -> logging.Logger:
     return logger
 
 
-def setup_logging(level: str = "INFO"):
-    numeric = getattr(logging, level.upper(), logging.INFO)
+def setup_logging(level: str = "DEBUG"):
+    numeric = getattr(logging, level.upper(), logging.DEBUG)
     root = logging.getLogger()
     root.setLevel(numeric)
 
@@ -94,7 +94,7 @@ def setup_logging(level: str = "INFO"):
     handler.setFormatter(AniFormatter())
     werkzeug_log.addHandler(handler)
     werkzeug_log.propagate = False
-    werkzeug_log.setLevel(logging.WARNING)
+    werkzeug_log.setLevel(logging.DEBUG)
 
 
 def divider(char: str = "─", width: int = 52):
