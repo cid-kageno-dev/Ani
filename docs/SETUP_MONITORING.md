@@ -1,274 +1,151 @@
-# Setting Up Monitoring for Ani in Production
+# Setting Up the Full Monitoring Stack
+
+This guide covers running Ani with a complete observability stack (Prometheus, Grafana, Elasticsearch, Kibana) via Docker Compose. This is intended for **self-hosted or production** setups, not Replit.
+
+For basic logging on Replit, see [MONITORING.md](MONITORING.md).
+
+---
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- At least 4 GB RAM available (Elasticsearch is memory-hungry)
+
+---
 
 ## Quick Start
 
-Use Docker Compose to run Ani with full monitoring stack:
-
 ```bash
+# Clone the repository
+git clone https://github.com/cid-kageno-dev/Ani.git
+cd Ani
+
+# Set your API key
+echo 'GOOGLE_API_KEY1=your_key_here' > .env
+
 # Start all services
 docker-compose -f docker-compose-monitoring.yml up -d
 
-# Access services
-# - Ani API: http://localhost:5000
-# - Prometheus: http://localhost:9090
-# - Grafana: http://localhost:3000 (admin/admin)
-# - Kibana (logs): http://localhost:5601
+# Check service health
+docker-compose -f docker-compose-monitoring.yml ps
 ```
 
 ---
 
-## Services Included
+## Services
 
-### 1. Ani (Main Application)
-- Port: 5000
-- Metrics endpoint: `/metrics`
-- Logs: `/var/log/ani/app.json.log`
-
-### 2. PostgreSQL (Database)
-- Port: 5432
-- Database: ani_db
-- Credentials in docker-compose.yml
-
-### 3. Prometheus (Metrics Storage)
-- Port: 9090
-- Scrapes Ani metrics every 15 seconds
-- Data retention: default
-
-### 4. Grafana (Visualization)
-- Port: 3000
-- Default: admin / admin
-- Pre-configured Prometheus datasource
-
-### 5. Elasticsearch (Centralized Logs)
-- Port: 9200
-- Stores JSON-formatted logs
-
-### 6. Kibana (Log Visualization)
-- Port: 5601
-- Query and visualize Elasticsearch logs
+| Service | Port | Purpose |
+|---------|------|---------|
+| **Ani** | 5000 | Main application |
+| **PostgreSQL** | 5432 | Chat interaction storage (fallback) |
+| **Prometheus** | 9090 | Metrics collection and storage |
+| **Grafana** | 3000 | Metrics visualisation dashboards |
+| **Elasticsearch** | 9200 | Centralised log storage |
+| **Kibana** | 5601 | Log search and visualisation |
 
 ---
 
 ## Configuration
 
-### Environment Variables
+### Environment variables
 
-```bash
-# Create .env file
-GOOGLE_API_KEY1=your_api_key
+Create a `.env` file in the project root:
+
+```ini
+GOOGLE_API_KEY1=AIzaSy...
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+FIREBASE_PROJECT_ID=gen-lang-client-0109922552
+FIREBASE_DATABASE_URL=https://...
 LOG_LEVEL=INFO
-LOG_DIR=/var/log/ani
 ```
 
-### Grafana Dashboards
+### Prometheus
 
-1. Login to Grafana (http://localhost:3000)
-2. Add Prometheus datasource: http://prometheus:9090
-3. Create dashboard with:
-   - Request rate (requests/sec)
-   - Response time (p50, p95, p99)
-   - Error rate (%)
-   - Service health status
-   - Active connections
-   - Cache hit rate
+`prometheus.yml` is already configured to scrape Ani at `/metrics` every 15 seconds. After wiring the `/metrics` route (see [MONITORING.md](MONITORING.md)), no further Prometheus config is needed.
 
-### Alert Rules
-
-Create `alert_rules.yml`:
+To add alerting rules, create `alert_rules.yml`:
 
 ```yaml
 groups:
   - name: ani_alerts
-    interval: 30s
     rules:
       - alert: HighErrorRate
         expr: increase(ani_counter_errors[5m]) > 10
         for: 5m
         annotations:
-          summary: "High error rate detected"
-      
-      - alert: HighResponseTime
-        expr: ani_gauge_response_time_avg_ms > 1000
-        for: 5m
-        annotations:
-          summary: "Average response time exceeds 1000ms"
-      
+          summary: "High error rate in Ani"
+
       - alert: ServiceDown
         expr: up{job="ani"} == 0
         for: 1m
         annotations:
-          summary: "Ani service is down"
+          summary: "Ani is not responding"
 ```
+
+### Grafana
+
+1. Open http://localhost:3000 (login: `admin` / `admin`).
+2. Add a Prometheus data source: `http://prometheus:9090`.
+3. Create a dashboard with panels for:
+   - Chat requests per minute
+   - AI vs. fallback response ratio
+   - Average response time
+   - Error rate
+   - DB cache hit rate
+
+### Kibana
+
+1. Open http://localhost:5601.
+2. Create an index pattern matching `logs-*`.
+3. Use the Discover view to search logs:
+   - `level:ERROR` — errors only
+   - `name:ani.chat` — chat interactions
+   - `name:ani.ai` — Gemini calls
 
 ---
 
-## Monitoring Workflows
-
-### 1. Real-time Metrics
+## Useful Commands
 
 ```bash
-# View metrics in Prometheus
-# Navigate to: http://localhost:9090/graph
-# Query: ani_counter_chat_requests
-```
+# View logs for all services
+docker-compose -f docker-compose-monitoring.yml logs -f
 
-### 2. Log Aggregation
+# View Ani logs only
+docker-compose -f docker-compose-monitoring.yml logs -f ani
 
-```bash
-# View logs in Kibana
-# Navigate to: http://localhost:5601
-# Index pattern: logs-*
-# Search: level:ERROR
-```
+# Restart Ani without restarting the whole stack
+docker-compose -f docker-compose-monitoring.yml restart ani
 
-### 3. Dashboard Monitoring
+# Stop everything
+docker-compose -f docker-compose-monitoring.yml down
 
-```bash
-# Create custom dashboard in Grafana
-# - Panel 1: Chat requests per minute
-# - Panel 2: Error rate
-# - Panel 3: Database connection pool
-# - Panel 4: Cache effectiveness
-```
-
----
-
-## Logging to External Services
-
-### AWS CloudWatch
-
-```python
-import boto3
-import logging
-from pythonjsonlogger import jsonlogger
-
-watchtower_handler = watchtower.CloudWatchLogHandler(
-    log_group='ani-app',
-    stream_name='production'
-)
-watchtower_handler.setFormatter(
-    jsonlogger.JsonFormatter()
-)
-logger.addHandler(watchtower_handler)
-```
-
-### Google Cloud Logging
-
-```python
-from google.cloud import logging as cloud_logging
-
-client = cloud_logging.Client()
-client.setup_logging()
-```
-
-### Datadog
-
-```python
-from datadog import initialize, api
-
-options = {
-    'api_key': os.getenv('DATADOG_API_KEY'),
-    'app_key': os.getenv('DATADOG_APP_KEY')
-}
-initialize(**options)
-```
-
----
-
-## Performance Tuning
-
-### Optimize Log Volume
-
-```ini
-# Only log WARNING and above in production
-LOG_LEVEL=WARNING
-```
-
-### Database Performance
-
-```sql
--- Create indexes for faster queries
-CREATE INDEX idx_created_at ON chat_interactions(created_at DESC);
-CREATE INDEX idx_user_id ON chat_interactions(user_id);
-```
-
-### Prometheus Tuning
-
-```yaml
-global:
-  scrape_interval: 30s      # Increase interval
-  evaluation_interval: 30s
-  external_labels:
-    cluster: 'production'
-```
-
----
-
-## Backup Strategy
-
-### Daily Log Backups
-
-```bash
-#!/bin/bash
-DATE=$(date +%Y%m%d)
-tar -czf logs_backup_${DATE}.tar.gz logs/
-aws s3 cp logs_backup_${DATE}.tar.gz s3://ani-backups/
-rm logs_backup_${DATE}.tar.gz
-```
-
-### Prometheus Snapshots
-
-```bash
-# Backup Prometheus data
-docker exec prometheus tar -czf /prometheus/snapshot.tar.gz /prometheus/
+# Stop and remove volumes (resets all data)
+docker-compose -f docker-compose-monitoring.yml down -v
 ```
 
 ---
 
 ## Troubleshooting
 
-### High Memory Usage
+### Prometheus shows Ani as "down"
+- Ensure the `/metrics` route is wired in `app/routes.py` (see [MONITORING.md](MONITORING.md)).
+- Check Ani is reachable: `docker exec prometheus curl http://ani:5000/metrics`.
 
+### Kibana shows no logs
+- Confirm Ani is writing JSON-structured logs to the volume path Logstash reads from.
+- Check log directory permissions: `chown -R 1000:1000 /var/log/ani/`.
+
+### Elasticsearch out of memory
 ```bash
-# Check container memory
-docker stats ani
-
-# Reduce Prometheus retention
+# Increase Docker's memory limit, or reduce ES heap:
 docker-compose -f docker-compose-monitoring.yml up -d \
-  --build --force-recreate
+  -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" elasticsearch
 ```
 
-### Missing Logs
-
-```bash
-# Check log directory
-ls -la /var/log/ani/
-
-# Check permissions
-chown -R 1000:1000 /var/log/ani/
-```
-
-### Prometheus Not Scraping
-
-```bash
-# Check Prometheus targets
-curl http://localhost:9090/api/v1/targets
-
-# Check connectivity
-docker exec prometheus curl http://ani:5000/metrics
-```
+### Grafana "No data"
+- Verify the Prometheus data source URL is `http://prometheus:9090` (use the container name, not localhost).
+- Confirm Prometheus is successfully scraping: http://localhost:9090/targets.
 
 ---
 
-## Next Steps
-
-1. ✅ Deploy monitoring stack
-2. ✅ Configure alerts
-3. ✅ Create dashboards
-4. ✅ Set up log retention
-5. ✅ Document runbooks
-6. ✅ Train team on monitoring
-
----
-
-For detailed logging info, see [MONITORING.md](MONITORING.md).
+For more on the monitoring module, see [MONITORING.md](MONITORING.md).

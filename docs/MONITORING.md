@@ -1,178 +1,89 @@
-# Monitoring & Logging Guide for Ani
+# Monitoring & Logging
 
 ## Overview
 
-Ani includes comprehensive monitoring and logging capabilities for production environments. This guide covers:
-
-- **Logging Configuration** - File and console logging with rotation
-- **Metrics Collection** - Performance and usage metrics
-- **Health Monitoring** - Service health checks
-- **Alert Management** - Critical event alerting
-- **Performance Tracking** - Request/response timing
+Ani includes structured logging out of the box and ships a standalone monitoring module (`monitoring.py`) with metrics, health, and alert utilities ready to be wired up.
 
 ---
 
-## Logging Setup
+## Logging
 
-### Basic Configuration
+### How it works
+
+Logging is configured in `app/logger.py` and initialised via `config.py`. Every module gets a named logger:
 
 ```python
-from logging_config import setup_logging, get_logger
+from app.logger import get_logger
+log = get_logger("ani.mymodule")
 
-# Initialize logging
-setup_logging(log_level='INFO')
-
-# Get logger instance
-logger = get_logger(__name__)
-
-# Use logger
-logger.info("Application started")
-logger.warning("Cache miss")
-logger.error("Database connection failed")
+log.info("Something happened")
+log.warning("Watch out")
+log.error("Something broke")
 ```
 
-### Environment Variables
+### Log level
 
-```ini
-# logging_config.py respects these variables:
-LOG_LEVEL=INFO              # DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_DIR=logs                # Directory for log files
-```
-
-### Log Files Generated
-
-```
-logs/
-├── app.json.log             # Structured JSON logs (10MB rotation)
-├── errors-2026-05-17.log    # Error logs only (daily rotation)
-└── debug-2026-05-17.log     # Debug logs (daily rotation)
-```
-
-### JSON Logging
-
-For production, use structured JSON logging:
+Controlled by the `LOG_LEVEL` environment variable or `config.json`:
 
 ```json
-{
-  "timestamp": "2026-05-17T12:34:56.789Z",
-  "level": "INFO",
-  "name": "ani.api",
-  "message": "Chat request processed",
-  "method": "POST",
-  "path": "/api/chat",
-  "status_code": 200,
-  "elapsed_ms": 245.3
-}
+{ "logging": { "level": "INFO" } }
+```
+
+Valid values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Default is `INFO`.
+
+On Replit, logs appear in the workflow console. In production, use `LOG_LEVEL=WARNING` to reduce noise.
+
+### Startup output
+
+On every boot the app prints a connection status table:
+
+```
+  CONNECTION STATUS
+────────────────────────────────────────────────────
+  ✓  Gemini AI    gemini-2.5-flash
+  ✓  Firebase     collection 'chat_interactions'
+  ✓  PostgreSQL   helium/heliumdb
+  ✓  DB Schema    active backend: firebase
+────────────────────────────────────────────────────
+```
+
+### Chat logging
+
+Every interaction is logged to the console with a visual separator:
+
+```
+────────────────────────────────────────────────────
+USER  ▶  What projects has Cid built?
+·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·  ·
+ANI   ◀  [AI Response] (843ms)
+          Cid has built several projects...
+────────────────────────────────────────────────────
 ```
 
 ---
 
-## Request/Response Logging
+## Monitoring Utilities (`monitoring.py`)
 
-### Automatic Logging
+`monitoring.py` is a standalone module — it is not currently wired to Flask routes. It provides three classes you can import and use:
 
-```python
-from logging_config import RequestLogger, get_logger
-from flask import Flask
-
-app = Flask(__name__)
-logger = get_logger(__name__)
-
-# Enable automatic request/response logging
-RequestLogger(app, logger)
-
-# All requests are now logged automatically
-```
-
-### Logged Information
-
-- Request method (GET, POST, etc.)
-- Request path and query parameters
-- Client IP address
-- Response status code
-- Execution time
-- Error details
-
----
-
-## Performance Monitoring
-
-### Using PerformanceLogger
-
-```python
-from logging_config import PerformanceLogger, get_logger
-import time
-
-logger = get_logger(__name__)
-
-# Monitor function execution time
-with PerformanceLogger(logger, 'expensive_operation', threshold_ms=1000):
-    # Your code here
-    time.sleep(0.5)
-    # If execution exceeds 1000ms, warning is logged
-```
-
-### Output
-
-```
-2026-05-17 12:34:56 - ani.api - DEBUG - Starting expensive_operation
-2026-05-17 12:34:56 - ani.api - DEBUG - expensive_operation completed in 500.23ms
-```
-
----
-
-## Metrics Collection
-
-### Recording Metrics
+### MetricsCollector
 
 ```python
 from monitoring import MetricsCollector
 
 metrics = MetricsCollector()
 
-# Record metric value
-metrics.record_metric('response_time', 245.3, tags={'endpoint': '/api/chat'})
+metrics.increment_counter("chat_requests")
+metrics.set_gauge("active_connections", 5)
+metrics.record_metric("response_time_ms", 243.5, tags={"endpoint": "/api/chat"})
 
-# Increment counter
-metrics.increment_counter('chat_requests')
-metrics.increment_counter('errors', 5)  # Increment by 5
-
-# Set gauge (current value)
-metrics.set_gauge('active_connections', 42)
-metrics.set_gauge('cache_size_mb', 156.7)
+# Export
+json_output = metrics.export_metrics("json")
+prom_output = metrics.export_metrics("prometheus")
+summary     = metrics.get_summary()
 ```
 
-### Exporting Metrics
-
-```python
-# JSON format
-json_metrics = metrics.export_metrics('json')
-print(json_metrics)
-
-# Prometheus format
-prometheus_metrics = metrics.export_metrics('prometheus')
-print(prometheus_metrics)
-
-# Summary
-summary = metrics.get_summary()
-print(summary)
-```
-
-### API Endpoint
-
-```bash
-# Get metrics in JSON
-curl http://localhost:5000/metrics
-
-# Get metrics in Prometheus format
-curl http://localhost:5000/metrics?format=prometheus
-```
-
----
-
-## Health Monitoring
-
-### Checking Service Health
+### HealthMonitor
 
 ```python
 from monitoring import HealthMonitor
@@ -181,40 +92,66 @@ from flask import Flask
 app = Flask(__name__)
 health = HealthMonitor(app)
 
-# Get full health status
 status = health.get_health()
-print(status)
+# {"status": "healthy", "ai_ready": True, "db_ready": True, ...}
 ```
 
-### Health Status Response
+### AlertManager
+
+```python
+from monitoring import AlertManager
+
+alerts = AlertManager()
+
+alerts.trigger_alert(
+    level="critical",
+    title="Database connection lost",
+    message="Cannot reach Firestore",
+    metadata={"project": "gen-lang-client-0109922552"}
+)
+
+alerts.trigger_alert(level="warning", title="Slow response", message="843ms avg")
+alerts.trigger_alert(level="info",    title="Cache cleared",  message="Manual clear")
+```
+
+Alert levels: `critical`, `warning`, `info`.
+
+### Wiring to Flask routes
+
+To expose metrics and alerts as HTTP endpoints, add to `app/routes.py`:
+
+```python
+from monitoring import init_monitoring
+
+metrics, health, alerts = init_monitoring(app, log)
+
+@main.route("/metrics")
+def get_metrics():
+    fmt = request.args.get("format", "json")
+    return metrics.export_metrics(fmt), 200, {"Content-Type": "text/plain" if fmt == "prometheus" else "application/json"}
+
+@main.route("/alerts")
+def get_alerts():
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify(alerts.get_recent(limit))
+```
+
+---
+
+## Health Check Endpoint
+
+The `/api/health` endpoint is already registered and returns:
 
 ```json
-{
-  "status": "healthy",
-  "ai_ready": true,
-  "db_ready": true,
-  "cache_ready": true,
-  "uptime_seconds": 3600,
-  "timestamp": "2026-05-17T12:34:56Z"
-}
+{ "status": "ok" }
 ```
 
-### Status Codes
+Use this for uptime monitoring, load balancer probes, or Kubernetes liveness checks:
 
-- **healthy** - All services operational
-- **degraded** - Some services unavailable
-- **unhealthy** - Major services down
-
-### Health Check Endpoint
-
-```bash
-# Check health (returns 200 if healthy, 503 if not)
-curl http://localhost:5000/health
-
-# Kubernetes readiness probe
+```yaml
 livenessProbe:
   httpGet:
-    path: /health
+    path: /api/health
     port: 5000
   initialDelaySeconds: 10
   periodSeconds: 10
@@ -222,320 +159,49 @@ livenessProbe:
 
 ---
 
-## Alert Management
+## Prometheus Integration
 
-### Triggering Alerts
-
-```python
-from monitoring import AlertManager, init_monitoring
-
-alerts = AlertManager()
-
-# Trigger different alert levels
-alerts.trigger_alert(
-    level='critical',
-    title='Database Connection Lost',
-    message='Cannot connect to PostgreSQL',
-    metadata={'host': 'db.example.com', 'port': 5432}
-)
-
-alerts.trigger_alert(
-    level='warning',
-    title='High Response Times',
-    message='Average response time exceeds 1000ms',
-    metadata={'avg_ms': 1234, 'threshold_ms': 1000}
-)
-
-alerts.trigger_alert(
-    level='info',
-    title='Cache Cleared',
-    message='GitHub cache was cleared',
-    metadata={'reason': 'manual'}
-)
-```
-
-### Alert Levels
-
-- **critical** - Immediate action required
-- **warning** - Investigate soon
-- **info** - Informational
-
-### Custom Alert Channels
-
-```python
-class EmailAlertChannel:
-    def send(self, alert):
-        # Send alert via email
-        send_email(
-            to='admin@example.com',
-            subject=f"[{alert['level'].upper()}] {alert['title']}",
-            body=alert['message']
-        )
-
-class SlackAlertChannel:
-    def send(self, alert):
-        # Send alert to Slack
-        webhook_url = os.getenv('SLACK_WEBHOOK')
-        requests.post(webhook_url, json={
-            'text': f"*{alert['level'].upper()}* - {alert['title']}",
-            'blocks': [{
-                'type': 'section',
-                'text': {'type': 'mrkdwn', 'text': alert['message']}
-            }]
-        })
-
-alerts = AlertManager()
-alerts.add_alert_channel(EmailAlertChannel())
-alerts.add_alert_channel(SlackAlertChannel())
-
-# Now alerts are sent to email and Slack
-alerts.trigger_alert('critical', 'Error', 'Database down')
-```
-
-### Viewing Alerts
-
-```bash
-# Get recent 50 alerts
-curl http://localhost:5000/alerts
-
-# Get last 100 alerts
-curl http://localhost:5000/alerts?limit=100
-```
-
----
-
-## Integration with Flask
-
-### Complete Setup
-
-```python
-from flask import Flask
-from logging_config import setup_logging, get_logger, RequestLogger
-from monitoring import init_monitoring
-import os
-
-def create_app():
-    app = Flask(__name__)
-    
-    # Setup logging
-    setup_logging(os.getenv('LOG_LEVEL', 'INFO'))
-    logger = get_logger(__name__)
-    
-    # Initialize monitoring
-    metrics, health, alerts = init_monitoring(app, logger)
-    
-    # Enable request logging
-    RequestLogger(app, logger)
-    
-    # Store in app for access in routes
-    app.metrics = metrics
-    app.health = health
-    app.alerts = alerts
-    
-    return app
-
-if __name__ == '__main__':
-    app = create_app()
-    app.run(debug=False)
-```
-
-### Using in Routes
-
-```python
-from flask import current_app, request
-from logging_config import get_logger, PerformanceLogger
-
-logger = get_logger(__name__)
-
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    with PerformanceLogger(logger, 'chat_endpoint', threshold_ms=500):
-        current_app.metrics.increment_counter('chat_requests')
-        
-        try:
-            # Your logic here
-            result = process_chat(data)
-            current_app.metrics.record_metric('response_time', 245.3)
-            return result
-        except Exception as e:
-            current_app.alerts.trigger_alert(
-                'error',
-                'Chat Processing Failed',
-                str(e)
-            )
-            raise
-```
-
----
-
-## Log Rotation
-
-### Configuration
-
-Log files are automatically rotated:
-
-- **app.json.log** - Rotates at 10MB, keeps 10 backups
-- **errors-*.log** - Rotates daily, keeps 20 backups
-- **debug-*.log** - Rotates daily, keeps 10 backups
-
-### Manual Cleanup
-
-```bash
-# Remove old log files (older than 30 days)
-find logs/ -name "*.log" -mtime +30 -delete
-
-# Archive old logs
-tar -czf logs_archive_$(date +%Y%m%d).tar.gz logs/
-rm -rf logs/*
-```
-
----
-
-## Production Deployment
-
-### Environment Variables
-
-```ini
-# .env (Production)
-LOG_LEVEL=WARNING           # Only WARNING and above
-LOG_DIR=/var/log/ani        # Persistent log directory
-FLASK_DEBUG=false           # Disable debug mode
-```
-
-### Docker Setup
-
-```dockerfile
-# In Dockerfile
-RUN mkdir -p /var/log/ani
-VOLUME ["/var/log/ani"]
-
-ENV LOG_DIR=/var/log/ani
-ENV LOG_LEVEL=INFO
-```
-
-### Docker Compose
-
-```yaml
-services:
-  ani:
-    volumes:
-      - ./logs:/var/log/ani
-    environment:
-      - LOG_LEVEL=INFO
-      - LOG_DIR=/var/log/ani
-```
-
-### Systemd Service
-
-```ini
-[Service]
-Environment="LOG_LEVEL=INFO"
-Environment="LOG_DIR=/var/log/ani"
-StandardOutput=journal
-StandardError=journal
-```
-
----
-
-## Monitoring Tools Integration
-
-### Prometheus
+If you wire `monitoring.py` to a `/metrics` route (see above), you can scrape it with Prometheus:
 
 ```yaml
 # prometheus.yml
 scrape_configs:
-  - job_name: 'ani'
+  - job_name: ani
     static_configs:
-      - targets: ['localhost:5000']
-    metrics_path: '/metrics?format=prometheus'
+      - targets: ["localhost:5000"]
+    metrics_path: /metrics
+    params:
+      format: [prometheus]
     scrape_interval: 15s
 ```
 
-### Grafana Dashboard
-
-Create dashboard with panels:
-- Request rate (requests/second)
-- Response time (avg, p95, p99)
-- Error rate
-- Service health status
-- Active connections
-
-### ELK Stack
-
-```python
-# Send logs to Elasticsearch
-from pythonjsonlogger import jsonlogger
-import logging.handlers
-
-handler = logging.handlers.SysLogHandler(address=('logstash.example.com', 5000))
-handler.setFormatter(jsonlogger.JsonFormatter())
-logger.addHandler(handler)
-```
+The project ships a ready-to-use `prometheus.yml` in the root directory.
 
 ---
 
-## Troubleshooting
+## Docker-based Monitoring Stack
 
-### No Logs Being Generated
-
-```python
-# Check logging is initialized
-from logging_config import setup_logging
-setup_logging('DEBUG')
-
-# Check log directory exists
-import os
-log_dir = os.getenv('LOG_DIR', 'logs')
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
-```
-
-### High Disk Usage
+For full Prometheus + Grafana + Elasticsearch + Kibana monitoring, use:
 
 ```bash
-# Check log file sizes
-du -sh logs/*
-
-# Reduce rotation size in logging_config.py
-maxBytes=5242880  # 5MB instead of 10MB
-
-# Clean up old logs
-find logs/ -name "*.log*" -mtime +7 -delete
+docker-compose -f docker-compose-monitoring.yml up -d
 ```
 
-### Performance Impact
+Services started:
 
-Logging has minimal overhead. If concerned:
-
-```python
-# Use INFO level instead of DEBUG in production
-setup_logging('INFO')
-
-# Disable JSON logging if not needed
-# (keeps only console and error files)
-```
+| Service | Port | URL |
+|---------|------|-----|
+| Ani | 5000 | http://localhost:5000 |
+| Prometheus | 9090 | http://localhost:9090 |
+| Grafana | 3000 | http://localhost:3000 (admin/admin) |
+| Elasticsearch | 9200 | http://localhost:9200 |
+| Kibana | 5601 | http://localhost:5601 |
 
 ---
 
 ## Best Practices
 
-✅ **Do**:
-- Log at appropriate levels (INFO for events, WARNING for issues)
-- Include context in logs (user ID, request path, etc.)
-- Monitor metrics regularly
-- Set up alerts for critical errors
-- Rotate logs to prevent disk overflow
-- Use structured JSON logging in production
-
-❌ **Don't**:
-- Log sensitive information (passwords, tokens)
-- Log at DEBUG level in production
-- Ignore critical alerts
-- Keep unlimited log history
-- Log on every line (use sampling for high-volume events)
-
----
-
-**For more information, see:**
-- [README.md](../README.md) - API documentation
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Development guide
+- Use `INFO` in development, `WARNING` in production.
+- Never log secrets, API keys, or PII.
+- The in-memory interaction and stats cache (5-minute TTL) already reduces DB load significantly; monitor cache hit rates if you add metrics.
+- For Replit deployments, workflow console logs are the primary log surface — no file rotation needed.

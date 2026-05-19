@@ -1,94 +1,66 @@
-# Swagger/OpenAPI Documentation
+# API Reference
 
-## Accessing API Documentation
+## Overview
 
-### Interactive UI
-
-```
-http://localhost:5000/api/docs
-```
-
-Browse and test all API endpoints directly in the browser.
+Ani's API is a small, focused REST interface. There is no Swagger/OpenAPI UI built into the app at this time. All endpoint details are documented in [API.md](API.md).
 
 ---
 
-## API Specification
+## Available Endpoints (summary)
 
-Get the raw OpenAPI spec:
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Chat web UI |
+| `POST` | `/api/chat` | Send a message, get Ani's reply |
+| `GET` | `/api/history` | Recent chat interactions |
+| `GET` | `/api/stats` | Aggregate usage statistics |
+| `GET` | `/api/health` | Liveness check |
 
-```
-http://localhost:5000/apispec.json
-```
-
----
-## Available Endpoints
-
-All endpoints are documented with:
-- Description
-- Request/response schemas
-- Example values
-- Error codes
-- Parameters
-
-### Try It Out
-
-1. Open http://localhost:5000/api/docs
-2. Click on any endpoint
-3. Click "Try it out"
-4. Fill in parameters
-5. Click "Execute"
+See [API.md](API.md) for full request/response details and examples.
 
 ---
 
-## Generating Client Libraries
+## Testing the API Manually
 
-Use OpenAPI Generator to create client SDKs:
+You can test any endpoint with `curl`, Postman, Insomnia, or any HTTP client.
 
-### Python
+### Health check
+```bash
+curl https://<your-repl>.replit.app/api/health
+```
+
+### Chat
+```bash
+curl -X POST https://<your-repl>.replit.app/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What has Cid built?"}'
+```
+
+### History
+```bash
+curl "https://<your-repl>.replit.app/api/history?limit=10"
+```
+
+### Stats
+```bash
+curl https://<your-repl>.replit.app/api/stats
+```
+
+---
+
+## Adding OpenAPI / Swagger Support
+
+If you want interactive API docs, you can add them by installing `flask-swagger-ui` and `flasgger`:
 
 ```bash
-openapi-generator generate \
-  -g python \
-  -i http://localhost:5000/apispec.json \
-  -o ./ani-python-client
+pip install flasgger
 ```
 
-### JavaScript/TypeScript
+Then in `app/__init__.py`:
 
-```bash
-openapi-generator generate \
-  -g typescript-fetch \
-  -i http://localhost:5000/apispec.json \
-  -o ./ani-js-client
+```python
+from flasgger import Swagger
+swagger = Swagger(app)
 ```
 
-### Go
-
-```bash
-openapi-generator generate \
-  -g go \
-  -i http://localhost:5000/apispec.json \
-  -o ./ani-go-client
-```
-
-### Java
-
-```bash
-openapi-generator generate \
-  -g java \
-  -i http://localhost:5000/apispec.json \
-  -o ./ani-java-client
-```
-
----
-
-## Testing with Swagger Editor
-
-1. Open https://editor.swagger.io/
-2. Select "File" → "Import URL"
-3. Enter: `http://localhost:5000/apispec.json`
-4. Browse and test endpoints
-
----
-
-For endpoint details, see [API.md](API.md).
+And annotate each route in `app/routes.py` with docstring YAML. Once added, the UI is available at `/apidocs`.

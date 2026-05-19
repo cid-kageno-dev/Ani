@@ -1,424 +1,311 @@
-# Contributing to Ani 💜
+# Contributing to Ani
 
-Thank you for your interest in contributing to Ani! We welcome all contributions, from bug reports to feature implementations. This guide will help you get started.
-
----
-
-## 📋 Code of Conduct
-
-We are committed to providing a welcoming and inspiring community for all. Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+Thank you for your interest in contributing! This guide covers everything you need to get started — from setting up a development environment to submitting a pull request.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
+
 - Python 3.10 or higher
 - Git
-- Pip
 
 ### Development Setup
 
-1. **Fork the Repository**
-   ```bash
-   # Click "Fork" on GitHub
-   ```
-
-2. **Clone Your Fork**
+1. **Fork and clone the repository**
    ```bash
    git clone https://github.com/YOUR_USERNAME/Ani.git
    cd Ani
    ```
 
-3. **Create Virtual Environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+2. **Install dependencies**
 
-4. **Install Development Dependencies**
+   On Replit, dependencies are already installed automatically. Locally:
    ```bash
+   pip install -r requirements.txt
    pip install -r requirements-dev.txt
    ```
 
-5. **Set Up Pre-commit Hooks** (optional but recommended)
+   > Virtual environments are optional — Replit manages its own Python environment, and local venvs are supported but not required.
+
+3. **Set up environment variables**
+
+   Copy the example file and fill in your credentials:
    ```bash
-   pip install pre-commit
-   pre-commit install
+   cp .env.example .env
+   # Add GOOGLE_API_KEY1 and Firebase credentials to .env
+   ```
+
+   On Replit, add secrets via the Secrets tab instead.
+
+4. **Run the app**
+   ```bash
+   python run.py
+   # Opens on http://localhost:5000
    ```
 
 ---
 
-## 📝 Development Workflow
+## Development Workflow
 
-### 1. Create a Feature Branch
+### 1. Create a branch
 
 ```bash
-# Update main branch
-git checkout main
-git pull origin main
-
-# Create feature branch
+git checkout main && git pull origin main
 git checkout -b feature/your-feature-name
-# Or for bug fixes:
-git checkout -b fix/bug-description
+# or for bug fixes:
+git checkout -b fix/short-description
 ```
 
-### 2. Make Your Changes
+### 2. Make changes
 
-- Keep commits focused and logical
-- Write clear commit messages
-- Follow the coding style guidelines (see below)
+- Keep commits focused and logical.
+- Follow the coding style guide below.
+- Update docs if your change affects API behaviour or configuration.
 
-### 3. Test Your Changes
+### 3. Test your changes
 
 ```bash
 # Run all tests
 pytest
 
-# Run with coverage
+# With coverage report
 pytest --cov=app --cov-report=html
 
-# Run specific test
+# Specific file
 pytest tests/test_api_endpoints.py -v
+
+# Unit tests only
+pytest -m "not integration"
 ```
 
-### 4. Code Quality Checks
+### 4. Code quality checks
 
 ```bash
-# Format code with Black
+# Format with Black
 black .
 
-# Check code style with Flake8
+# Lint with Flake8
 flake8 . --max-line-length=120
 
-# Type checking with mypy
+# Type check with mypy
 mypy app --ignore-missing-imports
 
-# Security check with Bandit
+# Security scan with Bandit
 bandit -r app
 ```
 
-### 5. Commit and Push
+### 5. Commit and push
 
 ```bash
-# Commit with clear message
 git add .
-git commit -m "feat: add new feature"
-
-# Push to your fork
+git commit -m "feat: add new feature description"
 git push origin feature/your-feature-name
 ```
 
-### 6. Create Pull Request
+### 6. Open a pull request
 
-- Go to https://github.com/cid-kageno-dev/Ani
-- Click "New Pull Request"
-- Select your branch
-- Fill in the PR template
-- Submit!
+- Go to https://github.com/cid-kageno-dev/Ani and click **New Pull Request**.
+- Select your branch and fill in the PR template.
 
 ---
 
-## 🎨 Coding Style Guide
+## Coding Style
 
-### Python Style (PEP 8 + Black)
+### Python (PEP 8 + Black)
 
 ```python
-# ✅ Good
-def get_user_data(user_id: int) -> dict[str, str]:
-    """Fetch user data from database.
-    
-    Args:
-        user_id: The unique user identifier.
-        
-    Returns:
-        Dictionary containing user information.
-    """
-    query = f"SELECT * FROM users WHERE id = {user_id}"
-    return execute_query(query)
+# Good
+def get_recent_interactions(limit: int = 20) -> list:
+    """Fetch recent chat interactions from the database.
 
-# ❌ Bad
-def get_user_data(uid):
-    q="SELECT * FROM users WHERE id = "+str(uid)
-    return execute_query(q)
+    Args:
+        limit: Maximum number of interactions to return (1–100).
+
+    Returns:
+        List of interaction dicts ordered newest-first.
+    """
+    ...
+
+# Bad
+def get_interactions(n):
+    pass
 ```
 
-### Naming Conventions
+### Naming conventions
 
-- **Functions/Variables:** `snake_case`
-- **Classes:** `PascalCase`
-- **Constants:** `UPPER_SNAKE_CASE`
-- **Private:** Prefix with `_`
+| Style | Used for |
+|-------|----------|
+| `snake_case` | Functions, variables, module names |
+| `PascalCase` | Classes |
+| `UPPER_SNAKE_CASE` | Module-level constants |
+| `_underscore_prefix` | Private/internal functions |
+
+### Type hints
+
+Use them on all public functions:
+
+```python
+def save_interaction(user_query: str, ai_response: str, source: str = "AI Response") -> None:
+    ...
+```
 
 ### Docstrings
 
-```python
-def process_message(message: str) -> str:
-    """Process a user message.
-    
-    Args:
-        message: The raw user message.
-        
-    Returns:
-        Processed and cleaned message.
-        
-    Raises:
-        ValueError: If message is empty.
-    """
-    if not message:
-        raise ValueError("Message cannot be empty")
-    return message.strip().lower()
-```
-
-### Type Hints
-
-```python
-from typing import Optional, List
-
-def get_repositories(
-    username: str,
-    limit: Optional[int] = None
-) -> List[dict[str, str]]:
-    """Get repositories for a user."""
-    pass
-```
+Use Google-style docstrings for public functions and classes.
 
 ---
 
-## ✅ Testing Guidelines
+## Testing Guidelines
 
-### Test Structure
+### Structure
+
+Tests live in `tests/`. Use `pytest` markers to categorise them:
 
 ```python
-import pytest
+@pytest.mark.unit
+def test_config_loading():
+    ...
+
+@pytest.mark.integration
+def test_firebase_roundtrip():
+    ...
+```
+
+### Coverage target
+
+- Minimum 70% coverage for a PR to pass CI.
+- Target 80%+ for new code.
+
+### Example test
+
+```python
 from app import create_app
 
 def test_health_endpoint():
-    """Test the health check endpoint."""
     app = create_app()
     client = app.test_client()
-    
-    response = client.get('/health')
-    
-    assert response.status_code == 200
-    assert response.json['status'] == 'ok'
 
-def test_chat_with_empty_message():
-    """Test chat endpoint with empty message."""
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "ok"
+
+
+def test_chat_rejects_empty_message():
     app = create_app()
     client = app.test_client()
-    
-    response = client.post('/api/chat', json={'message': ''})
-    
+
+    response = client.post("/api/chat", json={"message": ""})
+
     assert response.status_code == 400
 ```
 
-### Test Markers
-
-```python
-import pytest
-
-@pytest.mark.unit
-def test_config_loading():
-    pass
-
-@pytest.mark.integration
-def test_chat_flow():
-    pass
-
-@pytest.mark.slow
-def test_large_dataset():
-    pass
-```
-
-### Minimum Coverage Requirements
-
-- **Target:** 80% code coverage
-- **Minimum:** 70% for PRs to pass
-- Check: `pytest --cov=app --cov-report=html`
-
 ---
 
-## 🐛 Bug Reports
+## Commit Message Format
 
-### How to Report
-
-1. **Check existing issues** to avoid duplicates
-2. **Use GitHub Issues** with the bug template
-3. **Include:**
-   - Clear description of the bug
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Python version, OS, and environment
-   - Relevant logs or error messages
-
-### Example
-
-```markdown
-## Description
-Chat endpoint returns 500 error when message is very long.
-
-## Steps to Reproduce
-1. Send a POST request to `/api/chat`
-2. Include a message longer than 5000 characters
-3. Observe the response
-
-## Expected
-Should truncate or return 400 with message
-
-## Actual
-Returns 500 Internal Server Error
-
-## Environment
-- Python: 3.11
-- OS: Ubuntu 22.04
-- Branch: main
-```
-
----
-
-## 🎯 Feature Requests
-
-### How to Request
-
-1. **Search existing issues** first
-2. **Use GitHub Issues** with the feature template
-3. **Include:**
-   - Clear description
-   - Use case/motivation
-   - Possible implementation approach
-   - Any concerns or considerations
-
----
-
-## 📖 Commit Message Format
-
-We follow the Conventional Commits standard:
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-<type>(<scope>): <subject>
+<type>(<scope>): <short description>
 
-<body>
+<optional body>
 
-<footer>
+<optional footer>
 ```
 
 ### Types
-- **feat:** New feature
-- **fix:** Bug fix
-- **docs:** Documentation
-- **style:** Code style (no functionality)
-- **refactor:** Code refactoring
-- **perf:** Performance improvement
-- **test:** Test additions/changes
-- **ci:** CI/CD pipeline changes
-- **chore:** Dependency updates, etc.
+
+| Type | When to use |
+|------|-------------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation changes |
+| `style` | Formatting only (no logic change) |
+| `refactor` | Code restructuring without behaviour change |
+| `perf` | Performance improvement |
+| `test` | Adding or fixing tests |
+| `ci` | CI/CD pipeline changes |
+| `chore` | Dependency bumps, config, tooling |
 
 ### Examples
 
 ```
-feat(api): add user authentication endpoint
-
-Implement JWT-based authentication for API.
-Supports login and token refresh.
-
-Closes #123
-```
-
-```
-fix(cache): prevent cache overflow
-
-Limit cache size to 1000 entries.
-Implement LRU eviction policy.
-
-Fixes #456
+feat(ai): add support for Gemini 2.0 Flash
+fix(db): handle None created_at in Firebase interactions
+docs(api): correct /api/chat response shape
+test(routes): add integration test for /api/stats
 ```
 
 ---
 
-## 📋 Pull Request Template
+## Pull Request Template
 
 ```markdown
-## Description
-Brief description of changes.
+## What does this PR do?
+Brief description of the change.
 
-## Type of Change
+## Type of change
 - [ ] Bug fix
 - [ ] New feature
 - [ ] Breaking change
-- [ ] Documentation
+- [ ] Documentation / tests only
 
-## Related Issues
+## Related issues
 Closes #(issue number)
 
-## Testing
-Describe testing done.
+## Testing done
+Describe what you tested and how.
 
 ## Checklist
-- [ ] Tests added/updated
-- [ ] Documentation updated
-- [ ] Code follows style guidelines
-- [ ] No breaking changes
+- [ ] Tests added or updated
+- [ ] Documentation updated (README, API.md, etc.)
+- [ ] Code follows style guide
+- [ ] No breaking changes (or noted above)
 ```
 
 ---
 
-## 🔄 Code Review Process
+## Bug Reports
 
-1. **Automated Checks**
-   - Tests must pass
-   - Coverage must be >= 70%
-   - Code quality checks pass
-   - Security scan passes
+Use GitHub Issues and include:
 
-2. **Maintainer Review**
-   - Code quality
-   - Design consistency
-   - Documentation
-   - Performance implications
-
-3. **Feedback & Iteration**
-   - Address review comments
-   - Re-request review
-   - CI must pass again
-
-4. **Merge**
-   - Squash and merge or rebase
-   - Follow commit conventions
+1. Steps to reproduce
+2. Expected vs. actual behaviour
+3. Python version and OS
+4. Relevant log output or error message
 
 ---
 
-## 📚 Documentation
+## Feature Requests
 
-### Updating Docs
+Use GitHub Issues and include:
 
-- Update README.md for user-facing changes
-- Update docstrings for code changes
-- Update CONTRIBUTING.md for process changes
-
-### Running Docs Locally
-
-```bash
-# No special setup needed - docs are Markdown
-# Preview on GitHub or use a Markdown viewer
-```
+1. What problem does this solve?
+2. Proposed approach (if any)
+3. Any concerns or trade-offs
 
 ---
 
-## 🤔 Questions?
+## Code Review Process
 
-- Check [README.md](README.md)
-- Review [existing issues](https://github.com/cid-kageno-dev/Ani/issues)
-- Start a [discussion](https://github.com/cid-kageno-dev/Ani/discussions)
-- Email via GitHub profile
+1. CI runs automatically (tests, linting, coverage, security scan).
+2. A maintainer reviews the code, design, and documentation.
+3. Address any feedback and re-request review.
+4. On approval, changes are merged using squash-merge.
 
 ---
 
-## 📜 License
+## Questions?
+
+- Read [README.md](README.md) and [docs/API.md](docs/API.md)
+- Open a [GitHub Discussion](https://github.com/cid-kageno-dev/Ani/discussions)
+- Browse [existing issues](https://github.com/cid-kageno-dev/Ani/issues)
+
+---
 
 By contributing, you agree your code will be licensed under the MIT License.
 
----
-
-Thank you for contributing! 💜
+Thank you for contributing!
