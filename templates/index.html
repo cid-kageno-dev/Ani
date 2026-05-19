@@ -421,6 +421,63 @@
         .msg-bubble ul, .msg-bubble ol { padding-left: 20px; margin: 7px 0; display: grid; gap: 3px; }
         .msg-bubble p + p { margin-top: 8px; }
 
+        .code-block {
+            margin: 10px 0;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            overflow: hidden;
+            background: rgba(0,0,0,0.35);
+        }
+
+        .code-block-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            background: rgba(255,255,255,0.06);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .code-lang {
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        .copy-btn {
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            color: var(--text-muted);
+            border-radius: 7px;
+            padding: 3px 10px;
+            font: inherit;
+            font-size: 0.7rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.16s, color 0.16s, border-color 0.16s;
+        }
+
+        .copy-btn:hover { background: rgba(139,92,246,0.18); color: #c4b5fd; border-color: rgba(139,92,246,0.35); }
+        .copy-btn.copied { color: #86efac; border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.08); }
+
+        .code-block pre {
+            margin: 0;
+            padding: 14px 16px;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: #e2e8f0;
+            white-space: pre;
+        }
+
+        .code-block pre::-webkit-scrollbar { height: 6px; }
+        .code-block pre::-webkit-scrollbar-track { background: transparent; }
+        .code-block pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+
         .msg-meta {
             margin-top: 6px;
             padding: 0 6px;
@@ -763,35 +820,91 @@
             .replace(/`([^`]+)`/g, '<code>$1</code>');
     }
 
+    function copyCode(btn, code) {
+        navigator.clipboard.writeText(code).then(() => {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        });
+    }
+
     function parseMarkdown(text) {
-        const lines = text.split('\n');
         const html = [];
         let listOpen = false;
+        let inCodeBlock = false;
+        let codeLang = '';
+        let codeLines = [];
 
+        const flushList = () => {
+            if (listOpen) { html.push('</ul>'); listOpen = false; }
+        };
+
+        const flushCode = () => {
+            const raw = codeLines.join('\n');
+            const escaped = raw
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            const id = 'cb_' + Math.random().toString(36).slice(2, 8);
+            html.push(`
+                <div class="code-block">
+                    <div class="code-block-header">
+                        <span class="code-lang">${codeLang || 'code'}</span>
+                        <button class="copy-btn" onclick="copyCode(this, document.getElementById('${id}').textContent)">Copy</button>
+                    </div>
+                    <pre id="${id}">${escaped}</pre>
+                </div>
+            `);
+            codeLines = [];
+            codeLang = '';
+        };
+
+        const lines = text.split('\n');
         lines.forEach(line => {
-            const listMatch = line.match(/^\s*(?:•|-)\s+(.+)/);
-            if (listMatch) {
-                if (!listOpen) {
-                    html.push('<ul>');
-                    listOpen = true;
+            const fenceMatch = line.match(/^```(\w*)/);
+
+            if (fenceMatch && !inCodeBlock) {
+                flushList();
+                inCodeBlock = true;
+                codeLang = fenceMatch[1] || '';
+                return;
+            }
+
+            if (inCodeBlock) {
+                if (line.trimEnd() === '```') {
+                    flushCode();
+                    inCodeBlock = false;
+                } else {
+                    codeLines.push(line);
                 }
+                return;
+            }
+
+            const listMatch = line.match(/^\s*(?:•|-|\*)\s+(.+)/);
+            if (listMatch) {
+                if (!listOpen) { html.push('<ul>'); listOpen = true; }
                 html.push(`<li>${parseInlineMarkdown(listMatch[1])}</li>`);
                 return;
             }
 
-            if (listOpen) {
-                html.push('</ul>');
-                listOpen = false;
-            }
+            flushList();
 
             if (line.trim() === '') {
                 html.push('<br>');
+            } else if (/^#{1,3}\s/.test(line)) {
+                const level = line.match(/^(#{1,3})/)[1].length;
+                const content = line.replace(/^#{1,3}\s+/, '');
+                html.push(`<p><strong>${parseInlineMarkdown(content)}</strong></p>`);
             } else {
                 html.push(`<p>${parseInlineMarkdown(line)}</p>`);
             }
         });
 
-        if (listOpen) html.push('</ul>');
+        if (inCodeBlock) flushCode();
+        flushList();
         return html.join('');
     }
 
