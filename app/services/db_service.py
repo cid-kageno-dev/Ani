@@ -3,6 +3,7 @@ import importlib.util
 import json
 import time
 from datetime import datetime, timezone
+from threading import RLock
 
 from psycopg2 import pool
 import psycopg2.extras
@@ -19,6 +20,16 @@ _firebase_ready = False
 _firebase_admin = None
 _firebase_credentials = None
 _firebase_firestore = None
+
+# In-memory cache configuration
+_cache_lock = RLock()
+_cache = {
+    "interactions": [],
+    "interactions_timestamp": 0,
+    "stats": {},
+    "stats_timestamp": 0,
+}
+_CACHE_TTL = 300  # 5 minutes in seconds
 
 
 def _firebase_modules():
@@ -83,6 +94,51 @@ def _doc_to_interaction(doc) -> dict:
         "source": data.get("source", "AI Response"),
         "created_at": _normalize_datetime(data.get("created_at")),
     }
+
+
+def _is_cache_valid(cache_key: str) -> bool:
+    """Check if cache entry is still valid (not expired)."""
+    with _cache_lock:
+        timestamp_key = f"{cache_key}_timestamp"
+        if timestamp_key not in _cache:
+            return False
+        elapsed = time.time() - _cache[timestamp_key]
+        is_valid = elapsed < _CACHE_TTL
+        if not is_valid:
+            log.debug(f"Cache expired for '{cache_key}' (age: {elapsed:.1f}s)")
+        return is_valid
+
+
+def _get_cached(cache_key: str):
+    """Get value from cache if valid."""
+    with _cache_lock:
+        if _is_cache_valid(cache_key):
+            log.debug(f"Cache hit for '{cache_key}'")
+            return _cache.get(cache_key)
+    return None
+
+
+def _set_cache(cache_key: str, value):
+    """Store value in cache with timestamp."""
+    with _cache_lock:
+        _cache[cache_key] = value
+        _cache[f"{cache_key}_timestamp"] = time.time()
+        log.debug(f"Cache updated for '{cache_key}'")
+
+
+def _clear_cache(cache_key: str = None):
+    """Clear specific cache entry or all cache."""
+    with _cache_lock:
+        if cache_key:
+            if cache_key in _cache:
+                del _cache[cache_key]
+            timestamp_key = f"{cache_key}_timestamp"
+            if timestamp_key in _cache:
+                del _cache[timestamp_key]
+            log.debug(f"Cache cleared for '{cache_key}'")
+        else:
+            _cache.clear()
+            log.debug("All cache cleared")
 
 
 def _get_firestore():
@@ -201,6 +257,9 @@ def _save_interaction_firebase(user_query: str, ai_response: str, source: str):
     }
     update_time, ref = _firebase_collection().add(doc)
     log.info(f"Saved interaction {ref.id} [{source}] to Firebase at {update_time}")
+    # Invalidate cache so next fetch gets fresh data
+    _clear_cache("interactions")
+    _clear_cache("stats")
 
 
 def _save_interaction_postgres(user_query: str, ai_response: str, source: str):
@@ -218,6 +277,9 @@ def _save_interaction_postgres(user_query: str, ai_response: str, source: str):
         cur.close()
         ms = (time.perf_counter() - t0) * 1000
         log.info(f"Saved interaction #{row_id} [{source}] in {ms:.1f}ms")
+        # Invalidate cache so next fetch gets fresh data
+        _clear_cache("interactions")
+        _clear_cache("stats")
     except Exception as e:
         log.error(f"Failed to save interaction: {e}")
         if conn:
@@ -282,7 +344,11 @@ def get_fallback_answer(user_query: str) -> str:
     log.info(f"Fallback search for: '{user_query[:60]}'")
     t0 = time.perf_counter()
     try:
-        rows = _get_firebase_rows(500) if backend == "firebase" else _get_postgres_rows(500)
+        # Use cached interactions if available
+        rows = _get_cached("interactions")
+        if rows is None:
+            rows = _get_firebase_rows(500) if backend == "firebase" else _get_postgres_rows(500)
+            _set_cache("interactions", rows)
 
         if not rows:
             log.warning("Fallback DB is empty — no past interactions to match")
@@ -314,9 +380,17 @@ def get_recent_interactions(limit: int = 20) -> list:
         return []
 
     log.debug(f"Fetching {limit} recent interactions from {backend}")
+    
+    # Check cache first
+    cached_rows = _get_cached("interactions")
+    if cached_rows is not None:
+        log.debug(f"Returning {min(len(cached_rows), limit)} cached interactions")
+        return cached_rows[:limit]
+    
     if backend == "firebase":
         try:
             rows = _get_firebase_rows(limit)
+            _set_cache("interactions", rows)
             log.debug(f"Returned {len(rows)} Firebase interactions")
             return rows
         except Exception as e:
@@ -324,6 +398,7 @@ def get_recent_interactions(limit: int = 20) -> list:
             return []
 
     rows = _get_postgres_rows(limit)
+    _set_cache("interactions", rows)
     log.debug(f"Returned {len(rows)} PostgreSQL interactions")
     return rows
 
@@ -394,11 +469,20 @@ def get_stats() -> dict:
         log.warning("Stats unavailable — no database backend is configured")
         return _empty_stats()
 
+    # Check cache first
+    cached_stats = _get_cached("stats")
+    if cached_stats is not None:
+        return cached_stats
+
     if backend == "firebase":
         try:
-            return _get_firebase_stats()
+            stats = _get_firebase_stats()
+            _set_cache("stats", stats)
+            return stats
         except Exception as e:
             log.error(f"Firebase stats query failed: {e}")
             return _empty_stats()
 
-    return _get_postgres_stats()
+    stats = _get_postgres_stats()
+    _set_cache("stats", stats)
+    return stats
