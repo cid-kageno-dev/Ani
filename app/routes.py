@@ -10,6 +10,7 @@ from app.services.db_service import (
 )
 from app.logger import get_logger, divider
 import threading
+from datetime import datetime, timezone
 
 log      = get_logger("ani.routes")
 log_chat = get_logger("ani.chat")
@@ -28,6 +29,12 @@ def _log_message(user_input: str, response: str, source: str, ms: float):
     for line in response.splitlines():
         print(f"          {line}", flush=True)
     divider()
+
+
+def _iso8601(value) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 @main.route("/")
@@ -76,7 +83,7 @@ def history():
             "user_query":  row["user_query"],
             "ai_response": row["ai_response"],
             "source":      row["source"],
-            "created_at":  row["created_at"].isoformat(),
+            "created_at":  _iso8601(row.get("created_at")),
         }
         for row in rows
     ])

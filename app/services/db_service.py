@@ -97,16 +97,18 @@ def _doc_to_interaction(doc) -> dict:
 
 
 def _is_cache_valid(cache_key: str) -> bool:
-    """Check if cache entry is still valid (not expired)."""
-    with _cache_lock:
-        timestamp_key = f"{cache_key}_timestamp"
-        if timestamp_key not in _cache:
-            return False
-        elapsed = time.time() - _cache[timestamp_key]
-        is_valid = elapsed < _CACHE_TTL
-        if not is_valid:
-            log.debug(f"Cache expired for '{cache_key}' (age: {elapsed:.1f}s)")
-        return is_valid
+    """Check if cache entry is still valid (not expired).
+
+    NOTE: caller should hold _cache_lock if multiple cache reads must be consistent.
+    """
+    timestamp_key = f"{cache_key}_timestamp"
+    if timestamp_key not in _cache:
+        return False
+    elapsed = time.time() - _cache[timestamp_key]
+    is_valid = elapsed < _CACHE_TTL
+    if not is_valid:
+        log.debug(f"Cache expired for '{cache_key}' (age: {elapsed:.1f}s)")
+    return is_valid
 
 
 def _get_cached(cache_key: str):
