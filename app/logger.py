@@ -94,7 +94,7 @@ def setup_logging(level: str = "INFO"):
     handler.setFormatter(AniFormatter())
     werkzeug_log.addHandler(handler)
     werkzeug_log.propagate = False
-    werkzeug_log.setLevel(logging.INFO)
+    werkzeug_log.setLevel(logging.WARNING)
 
 
 def divider(char: str = "─", width: int = 52):
