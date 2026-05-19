@@ -287,7 +287,7 @@ Flask-CORS is already configured and enabled on all routes. If you're hitting CO
 
 ## Author
 
-**Cid Kageno** — [GitHub](https://github.com/cid-kageno-dev) | [Website](https://cid-kageno.top)
+**Cid Kageno** — [GitHub](https://github.com/cid-kageno-dev) | [Website](https://www.mritunjoy.online/)
 
 Meet **Ani** — your smart portfolio AI assistant.
 
