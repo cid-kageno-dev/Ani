@@ -146,7 +146,7 @@ def get_gemini_response(prompt: str) -> str | None:
 
     context      = fetch_github_context()
     sys_prompt   = _system_prompt(context)
-    max_attempts = len(keys)
+    max_attempts = len(keys) * 3  # 3 retries per key
 
     for attempt in range(max_attempts):
         try:
@@ -170,11 +170,25 @@ def get_gemini_response(prompt: str) -> str | None:
 
         except Exception as e:
             ms = (time.perf_counter() - t0) * 1000
-            log.error(f"Key #{_key_index + 1} error after {ms:.0f}ms: {e}")
-            if attempt < max_attempts - 1:
-                _rotate()
+            err_str = str(e)
+            is_503  = "503" in err_str or "UNAVAILABLE" in err_str
+            is_429  = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+
+            if is_503:
+                wait = 3 * (attempt + 1)
+                log.warning(f"Key #{_key_index + 1} — model busy (503), retrying in {wait}s (attempt {attempt + 1}/{max_attempts})")
+                time.sleep(wait)
+            elif is_429:
+                log.error(f"Key #{_key_index + 1} — quota exceeded (429) after {ms:.0f}ms")
+                if attempt < max_attempts - 1:
+                    _rotate()
             else:
-                log.critical("All API keys exhausted — falling back to DB")
+                log.error(f"Key #{_key_index + 1} error after {ms:.0f}ms: {e}")
+                if attempt < max_attempts - 1:
+                    _rotate()
+
+            if attempt == max_attempts - 1:
+                log.critical("All attempts exhausted — falling back to DB")
                 return None
 
     return None

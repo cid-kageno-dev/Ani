@@ -88,9 +88,9 @@ class Config:
     DATABASE_BACKEND: str = _CONFIG.get("database", {}).get("backend", "firebase")
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-    # Firebase (from config.json)
+    # Firebase — env secret takes priority; hardcoded dict is the fallback
     FIREBASE_CREDENTIALS: str = "firebase-key.json"
-    FIREBASE_SERVICE_ACCOUNT_JSON: str = json.dumps(_FIREBASE_SERVICE_ACCOUNT)
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or json.dumps(_FIREBASE_SERVICE_ACCOUNT)
     FIREBASE_PROJECT_ID: str = _CONFIG.get("database", {}).get("firebase", {}).get("project_id", "gen-lang-client-0109922552")
     FIREBASE_DATABASE_URL: str = _CONFIG.get("database", {}).get("firebase", {}).get("database_url", "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app")
     FIREBASE_COLLECTION: str = _CONFIG.get("database", {}).get("firebase", {}).get("collection", "chat_interactions")
