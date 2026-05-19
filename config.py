@@ -115,9 +115,9 @@ class Config:
         if _single:
             GOOGLE_API_KEYS.append(_single)
 
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    GEMINI_TEMP: float = float(os.getenv("GEMINI_TEMP", "0.55"))
-    GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "512"))
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    GEMINI_TEMP: float = float(os.getenv("GEMINI_TEMP", "0.2"))
+    GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "4096"))
 
     # Debug (from config.json or environment)
     DEBUG: bool = _CONFIG.get("app", {}).get("debug", os.getenv("FLASK_DEBUG", "true").lower() == "true")
