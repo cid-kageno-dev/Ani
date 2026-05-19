@@ -1,0 +1,34 @@
+{
+  "app": {
+    "name": "Ani",
+    "version": "1.0.0",
+    "author": "Cid Kageno",
+    "description": "A smart, Portfolio AI assistant",
+    "debug": true
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "threaded": true
+  },
+  "database": {
+    "backend": "firebase",
+    "firebase": {
+      "project_id": "gen-lang-client-0109922552",
+      "database_url": "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app",
+      "collection": "chat_interactions"
+    }
+  },
+  "github": {
+    "username": "cid-kageno-dev",
+    "cache_ttl": 300
+  },
+  "logging": {
+    "level": "INFO"
+  },
+  "features": {
+    "ai_chat": true,
+    "github_integration": true,
+    "monitoring": true
+  }
+}
