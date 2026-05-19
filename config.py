@@ -1,11 +1,31 @@
 import os
 import json
+from pathlib import Path
 from app.logger import get_logger, setup_logging
 
 setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
 log = get_logger("ani.config")
 
+
+def load_config(config_path: str = "config.json") -> dict:
+    """Load configuration from config.json file."""
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        log.error(f"Configuration file not found: {config_path}")
+        log.info("Please copy config.example.json to config.json and update values")
+        raise
+    except json.JSONDecodeError as e:
+        log.error(f"Invalid JSON in config file: {e}")
+        raise
+
+
+# Load configuration from config.json
+_CONFIG = load_config()
+
+# Firebase credentials from environment or hardcoded fallback
 _FIREBASE_SERVICE_ACCOUNT = {
     "type": "service_account",
     "project_id": "gen-lang-client-0109922552",
@@ -51,6 +71,35 @@ _FIREBASE_SERVICE_ACCOUNT = {
 
 
 class Config:
+    """Application configuration loaded from config.json and environment variables."""
+
+    # App Info (from config.json)
+    APP_NAME: str = _CONFIG.get("app", {}).get("name", "Ani")
+    APP_VERSION: str = _CONFIG.get("app", {}).get("version", "1.0.0")
+    APP_DESCRIPTION: str = _CONFIG.get("app", {}).get("description", "")
+    APP_AUTHOR: str = _CONFIG.get("app", {}).get("author", "")
+
+    # Server (from config.json)
+    SERVER_HOST: str = _CONFIG.get("server", {}).get("host", "0.0.0.0")
+    SERVER_PORT: int = int(os.getenv("PORT", _CONFIG.get("server", {}).get("port", 5000)))
+    SERVER_THREADED: bool = _CONFIG.get("server", {}).get("threaded", True)
+
+    # Database (from config.json)
+    DATABASE_BACKEND: str = _CONFIG.get("database", {}).get("backend", "firebase")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
+    # Firebase (from config.json)
+    FIREBASE_CREDENTIALS: str = "firebase-key.json"
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = json.dumps(_FIREBASE_SERVICE_ACCOUNT)
+    FIREBASE_PROJECT_ID: str = _CONFIG.get("database", {}).get("firebase", {}).get("project_id", "gen-lang-client-0109922552")
+    FIREBASE_DATABASE_URL: str = _CONFIG.get("database", {}).get("firebase", {}).get("database_url", "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app")
+    FIREBASE_COLLECTION: str = _CONFIG.get("database", {}).get("firebase", {}).get("collection", "chat_interactions")
+
+    # GitHub (from config.json)
+    GITHUB_USERNAME: str = _CONFIG.get("github", {}).get("username", "cid-kageno-dev")
+    GITHUB_CACHE_TTL: int = _CONFIG.get("github", {}).get("cache_ttl", 300)
+
+    # Gemini API (from environment variables only - NOT from config.json)
     GOOGLE_API_KEYS: list[str] = []
 
     _i = 1
@@ -66,31 +115,29 @@ class Config:
         if _single:
             GOOGLE_API_KEYS.append(_single)
 
-    DATABASE_BACKEND: str = "firebase"
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
-
-    FIREBASE_CREDENTIALS: str = "firebase-key.json"
-    FIREBASE_SERVICE_ACCOUNT_JSON: str = json.dumps(_FIREBASE_SERVICE_ACCOUNT)
-    FIREBASE_DATABASE_URL: str = "https://gen-lang-client-0109922552-default-rtdb.asia-southeast1.firebasedatabase.app"
-    FIREBASE_PROJECT_ID: str = "gen-lang-client-0109922552"
-    FIREBASE_COLLECTION: str = "chat_interactions"
-
-    GITHUB_USERNAME: str = "cid-kageno-dev"
-    GITHUB_CACHE_TTL: int = int(os.getenv("GITHUB_CACHE_TTL", "300"))
-
-    GEMINI_MODEL: str    = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    GEMINI_TEMP: float   = float(os.getenv("GEMINI_TEMP", "0.55"))
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_TEMP: float = float(os.getenv("GEMINI_TEMP", "0.55"))
     GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "512"))
 
-    DEBUG: bool = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+    # Debug (from config.json or environment)
+    DEBUG: bool = _CONFIG.get("app", {}).get("debug", os.getenv("FLASK_DEBUG", "true").lower() == "true")
 
+    # Logging (from config.json or environment)
+    LOG_LEVEL: str = _CONFIG.get("logging", {}).get("level", os.getenv("LOG_LEVEL", "INFO"))
+
+    # Features (from config.json)
+    FEATURES: dict = _CONFIG.get("features", {})
+
+    # Logging initialization
     if GOOGLE_API_KEYS:
         log.info(f"Loaded {len(GOOGLE_API_KEYS)} Gemini API key(s)")
     else:
         log.warning("No Gemini API keys found — AI responses will be unavailable")
 
+    log.info(f"Application: {APP_NAME} v{APP_VERSION}")
     log.info(f"Database backend: {DATABASE_BACKEND}")
     log.info(f"Firebase configured — project '{FIREBASE_PROJECT_ID}', collection '{FIREBASE_COLLECTION}'")
+    log.info(f"GitHub username: {GITHUB_USERNAME}")
 
     if DATABASE_URL:
         log.info("DATABASE_URL is set (PostgreSQL fallback available)")
