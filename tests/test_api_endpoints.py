@@ -8,14 +8,14 @@ class TestHealthEndpoint:
 
     def test_health_returns_ok(self, client):
         """Test that health endpoint returns ok status."""
-        response = client.get('/health')
+        response = client.get('/api/health')
         assert response.status_code == 200
         data = response.get_json()
         assert data['status'] == 'ok'
 
     def test_health_response_structure(self, client):
         """Test health response has all required fields."""
-        response = client.get('/health')
+        response = client.get('/api/health')
         data = response.get_json()
         assert 'status' in data
 
@@ -25,23 +25,23 @@ class TestChatEndpoint:
 
     def test_chat_with_message(self, client):
         """Test chat endpoint with valid message."""
-        response = client.post('/chat', json={'message': 'Hello Ani'})
+        response = client.post('/api/chat', json={'message': 'Hello Ani'})
         assert response.status_code in [200, 500]
 
     def test_chat_missing_message(self, client):
         """Test chat endpoint without message field."""
-        response = client.post('/chat', json={})
+        response = client.post('/api/chat', json={})
         assert response.status_code == 400
 
     def test_chat_empty_message(self, client):
         """Test chat endpoint with empty message."""
-        response = client.post('/chat', json={'message': ''})
+        response = client.post('/api/chat', json={'message': ''})
         assert response.status_code == 400
 
     def test_chat_invalid_json(self, client):
         """Test chat endpoint with invalid JSON."""
         response = client.post(
-            '/chat',
+            '/api/chat',
             data='invalid json',
             content_type='application/json'
         )
@@ -58,5 +58,5 @@ class TestErrorHandling:
 
     def test_method_not_allowed(self, client):
         """Test 405 for wrong HTTP method."""
-        response = client.post('/health')
+        response = client.post('/api/health')
         assert response.status_code == 405

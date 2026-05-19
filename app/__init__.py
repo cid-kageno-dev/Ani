@@ -72,7 +72,7 @@ def create_app() -> Flask:
 
     from app.routes import main
     app.register_blueprint(main)
-    log.info("Routes ready  →  / | /chat | /history | /stats | /health")
+    log.info("Routes ready  →  / | /api/chat | /api/history | /api/stats | /api/health")
     divider()
 
     return app

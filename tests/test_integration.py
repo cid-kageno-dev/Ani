@@ -18,5 +18,5 @@ class TestIntegration:
     @pytest.mark.integration
     def test_health_check_integration(self, client):
         """Test health check in integration."""
-        response = client.get('/health')
+        response = client.get('/api/health')
         assert response.status_code == 200
