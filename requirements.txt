@@ -13,3 +13,12 @@ gunicorn
 psycopg2-binary
 python-json-logger
 thefuzz
+firebase-admin
+flask
+flask-cors
+google-genai
+gunicorn
+psycopg2-binary
+python-json-logger
+requests
+thefuzz
