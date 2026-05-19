@@ -5,3 +5,11 @@ gunicorn
 psycopg2-binary
 thefuzz
 firebase-admin
+firebase-admin
+flask
+flask-cors
+google-genai
+gunicorn
+psycopg2-binary
+python-json-logger
+thefuzz
