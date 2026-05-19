@@ -115,7 +115,7 @@ class Config:
         if _single:
             GOOGLE_API_KEYS.append(_single)
 
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     GEMINI_TEMP: float = float(os.getenv("GEMINI_TEMP", "0.2"))
     GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "4096"))
 
