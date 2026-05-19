@@ -128,6 +128,10 @@ class Config:
     # Features (from config.json)
     FEATURES: dict = _CONFIG.get("features", {})
 
+    # AI system prompt template (from config.json)
+    # Use {context} as a placeholder — it is filled at runtime with live GitHub data.
+    AI_SYSTEM_PROMPT: str = _CONFIG.get("ai", {}).get("system_prompt", "")
+
     # Logging initialization
     if GOOGLE_API_KEYS:
         log.info(f"Loaded {len(GOOGLE_API_KEYS)} Gemini API key(s)")
