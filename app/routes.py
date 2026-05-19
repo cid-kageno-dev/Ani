@@ -36,7 +36,7 @@ def home():
     return render_template("index.html")
 
 
-@main.route("/chat", methods=["POST"])
+@main.route("/api/chat", methods=["POST"])
 @cross_origin()
 def chat():
     t0         = time.perf_counter()
@@ -63,12 +63,12 @@ def chat():
     return jsonify({"response": fallback, "source": "Database"})
 
 
-@main.route("/history", methods=["GET"])
+@main.route("/api/history", methods=["GET"])
 @cross_origin()
 def history():
     requested_limit = request.args.get("limit", 20, type=int) or 20
     limit = max(1, min(requested_limit, 100))
-    log.info(f"GET /history  limit={limit}")
+    log.info(f"GET /api/history  limit={limit}")
     rows = get_recent_interactions(limit=limit)
     return jsonify([
         {
@@ -82,10 +82,10 @@ def history():
     ])
 
 
-@main.route("/stats", methods=["GET"])
+@main.route("/api/stats", methods=["GET"])
 @cross_origin()
 def stats():
-    log.info("GET /stats")
+    log.info("GET /api/stats")
     data = get_stats()
     log.info(
         f"Stats  →  total={data.get('total', 0)} | "
@@ -95,7 +95,7 @@ def stats():
     return jsonify(data)
 
 
-@main.route("/health", methods=["GET"])
+@main.route("/api/health", methods=["GET"])
 def health():
-    log.info("GET /health  →  ok")
+    log.info("GET /api/health  →  ok")
     return jsonify({"status": "ok"})
